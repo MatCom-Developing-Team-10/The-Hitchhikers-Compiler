@@ -1,0 +1,9 @@
+// HULK grammar — skeleton.
+//
+// This file is processed by build.rs into src/grammar.rs.
+// Rule of thumb: keep this small until the AST contract in `hulk-ast` is
+// stable, then grow it section by section (A.1 -> A.9 -> OOP -> extension).
+
+grammar;
+
+pub Num: i64 = <s:r"[0-9]+"> => s.parse().unwrap();

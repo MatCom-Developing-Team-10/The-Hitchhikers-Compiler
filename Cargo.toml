@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/hulk-ast",
+    "crates/hulk-lexer",
+    "crates/hulk-parser",
+    "crates/hulk-semantic",
+    "crates/hulk-ir",
+    "crates/hulk-vm",
+    "hulkc",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+authors = ["The Hitchhiker's Compiler Team"]
+rust-version = "1.85"
+repository = "https://github.com/Izengard/The-Hitchhikers-Compiler"
+
+[workspace.dependencies]
+# Internal crates
+hulk-ast      = { path = "crates/hulk-ast" }
+hulk-lexer    = { path = "crates/hulk-lexer" }
+hulk-parser   = { path = "crates/hulk-parser" }
+hulk-semantic = { path = "crates/hulk-semantic" }
+hulk-ir       = { path = "crates/hulk-ir" }
+hulk-vm       = { path = "crates/hulk-vm" }
+
+# External crates
+logos        = "0.16"
+lalrpop      = "0.23"
+lalrpop-util = { version = "0.23", features = ["lexer", "unicode"] }
+clap         = { version = "4.6", features = ["derive"] }
+thiserror    = "2"
+anyhow       = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

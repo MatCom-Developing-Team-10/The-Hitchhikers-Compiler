@@ -1,0 +1,17 @@
+[package]
+name = "hulk-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "LALRpop-based parser for the HULK language."
+build = "build.rs"
+
+[dependencies]
+hulk-ast     = { workspace = true }
+hulk-lexer   = { workspace = true }
+lalrpop-util = { workspace = true }
+
+[build-dependencies]
+lalrpop = { workspace = true }

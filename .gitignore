@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+.DS_Store
+*.swp
+
+# LALRpop generated files
+crates/hulk-parser/src/grammar.rs
+
+# Editor / IDE
+.idea/
+.vscode/
+*.iml
