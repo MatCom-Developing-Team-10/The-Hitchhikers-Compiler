@@ -1,0 +1,79 @@
+//! Semantic-analysis diagnostics. Every variant carries the span that should
+//! be highlighted in the source by the caller (typically the CLI).
+
+use crate::ast::Span;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum SemError {
+    #[error("undefined variable `{name}`")]
+    UndefinedVariable { name: String, span: Span },
+
+    #[error("undefined function `{name}`")]
+    UndefinedFunction { name: String, span: Span },
+
+    #[error("undefined type `{name}`")]
+    UndefinedType { name: String, span: Span },
+
+    #[error("type mismatch: expected `{expected}`, found `{found}`")]
+    Mismatch { expected: String, found: String, span: Span },
+
+    #[error("cannot inherit from built-in type `{name}`")]
+    InheritBuiltin { name: String, span: Span },
+
+    #[error("cyclic inheritance involving `{name}`")]
+    CyclicInheritance { name: String, span: Span },
+
+    #[error("duplicate type `{name}`")]
+    DuplicateType { name: String, span: Span },
+
+    #[error("duplicate function `{name}`")]
+    DuplicateFunction { name: String, span: Span },
+
+    #[error("method `{name}` overrides parent with a different signature")]
+    OverrideSignatureMismatch { name: String, span: Span },
+
+    #[error("wrong number of arguments: expected {expected}, found {found}")]
+    Arity { expected: usize, found: usize, span: Span },
+
+    #[error("type `{ty}` has no attribute `{name}`")]
+    NoSuchAttribute { ty: String, name: String, span: Span },
+
+    #[error("type `{ty}` has no method `{name}`")]
+    NoSuchMethod { ty: String, name: String, span: Span },
+
+    #[error("`self` is not a valid assignment target")]
+    SelfAssign { span: Span },
+
+    #[error("attributes are private; can only be assigned through `self`")]
+    NonSelfFieldAssign { span: Span },
+
+    #[error("`base()` used outside an overriding method")]
+    BaseOutsideOverride { span: Span },
+
+    #[error("`base()` is only valid when the parent declares a method with the same name")]
+    BaseNoParentMethod { span: Span },
+}
+
+impl SemError {
+    pub fn span(&self) -> Span {
+        match self {
+            SemError::UndefinedVariable { span, .. }
+            | SemError::UndefinedFunction { span, .. }
+            | SemError::UndefinedType { span, .. }
+            | SemError::Mismatch { span, .. }
+            | SemError::InheritBuiltin { span, .. }
+            | SemError::CyclicInheritance { span, .. }
+            | SemError::DuplicateType { span, .. }
+            | SemError::DuplicateFunction { span, .. }
+            | SemError::OverrideSignatureMismatch { span, .. }
+            | SemError::Arity { span, .. }
+            | SemError::NoSuchAttribute { span, .. }
+            | SemError::NoSuchMethod { span, .. }
+            | SemError::SelfAssign { span }
+            | SemError::NonSelfFieldAssign { span }
+            | SemError::BaseOutsideOverride { span }
+            | SemError::BaseNoParentMethod { span } => *span,
+        }
+    }
+}

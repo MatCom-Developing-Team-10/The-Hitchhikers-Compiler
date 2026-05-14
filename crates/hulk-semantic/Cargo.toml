@@ -7,6 +7,11 @@ authors.workspace = true
 rust-version.workspace = true
 description = "Semantic analysis, symbol table, and type checking for HULK."
 
+# NOTE: We deliberately do NOT depend on `hulk-ast` yet. The AST types that
+# this crate needs are vendored locally in `src/ast.rs` while role A finishes
+# the design of the shared AST crate. Once `hulk-ast` exposes the types
+# documented in `src/ast.rs`, swap `crate::ast` for `hulk_ast` and remove the
+# local module.
+
 [dependencies]
-hulk-ast  = { workspace = true }
 thiserror = { workspace = true }
