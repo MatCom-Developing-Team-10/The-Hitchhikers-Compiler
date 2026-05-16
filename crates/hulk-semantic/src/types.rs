@@ -17,12 +17,12 @@ pub enum Type {
 impl Type {
     pub fn name(&self) -> &str {
         match self {
-            Type::Number    => "Number",
-            Type::String    => "String",
-            Type::Boolean   => "Boolean",
-            Type::Object    => "Object",
-            Type::User(n)   => n,
-            Type::Error     => "<error>",
+            Type::Number => "Number",
+            Type::String => "String",
+            Type::Boolean => "Boolean",
+            Type::Object => "Object",
+            Type::User(n) => n,
+            Type::Error => "<error>",
         }
     }
 }
@@ -51,7 +51,7 @@ pub struct TypeInfo {
     pub methods: HashMap<String, MethodSig>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TypeCtx {
     pub types: HashMap<String, TypeInfo>,
     pub funcs: HashMap<String, FunctionSig>,
@@ -62,40 +62,84 @@ impl TypeCtx {
     pub fn new() -> Self {
         let mut funcs = HashMap::new();
         // A.2.3 builtin math functions.
-        funcs.insert("print".into(),
-            FunctionSig { params: vec![Type::Object], returns: Type::Object });
-        funcs.insert("sqrt".into(),
-            FunctionSig { params: vec![Type::Number], returns: Type::Number });
-        funcs.insert("sin".into(),
-            FunctionSig { params: vec![Type::Number], returns: Type::Number });
-        funcs.insert("cos".into(),
-            FunctionSig { params: vec![Type::Number], returns: Type::Number });
-        funcs.insert("exp".into(),
-            FunctionSig { params: vec![Type::Number], returns: Type::Number });
-        funcs.insert("log".into(),
-            FunctionSig { params: vec![Type::Number, Type::Number], returns: Type::Number });
-        funcs.insert("rand".into(),
-            FunctionSig { params: vec![], returns: Type::Number });
+        funcs.insert(
+            "print".into(),
+            FunctionSig {
+                params: vec![Type::Object],
+                returns: Type::Object,
+            },
+        );
+        funcs.insert(
+            "sqrt".into(),
+            FunctionSig {
+                params: vec![Type::Number],
+                returns: Type::Number,
+            },
+        );
+        funcs.insert(
+            "sin".into(),
+            FunctionSig {
+                params: vec![Type::Number],
+                returns: Type::Number,
+            },
+        );
+        funcs.insert(
+            "cos".into(),
+            FunctionSig {
+                params: vec![Type::Number],
+                returns: Type::Number,
+            },
+        );
+        funcs.insert(
+            "exp".into(),
+            FunctionSig {
+                params: vec![Type::Number],
+                returns: Type::Number,
+            },
+        );
+        funcs.insert(
+            "log".into(),
+            FunctionSig {
+                params: vec![Type::Number, Type::Number],
+                returns: Type::Number,
+            },
+        );
+        funcs.insert(
+            "rand".into(),
+            FunctionSig {
+                params: vec![],
+                returns: Type::Number,
+            },
+        );
         // `range(a, b)` is leniently typed: it produces "something iterable of Number".
         // We do not model Iterable as a real protocol yet, so we return Object and let
         // `for (x in range(...))` bind `x : Number` by construction (see Checker).
-        funcs.insert("range".into(),
-            FunctionSig { params: vec![Type::Number, Type::Number], returns: Type::Object });
+        funcs.insert(
+            "range".into(),
+            FunctionSig {
+                params: vec![Type::Number, Type::Number],
+                returns: Type::Object,
+            },
+        );
 
         let mut builtin_consts = HashMap::new();
         builtin_consts.insert("PI".into(), Type::Number);
-        builtin_consts.insert("E".into(),  Type::Number);
+        builtin_consts.insert("E".into(), Type::Number);
 
-        Self { types: HashMap::new(), funcs, builtin_consts }
+        Self {
+            types: HashMap::new(),
+            funcs,
+            builtin_consts,
+        }
     }
 
     /// Resolve a syntactic type name (`"Number"`, `"Point"`, etc.) to a `Type`.
     pub fn resolve_name(&self, name: &str) -> Option<Type> {
         match name {
-            "Number"  => Some(Type::Number),
-            "String"  => Some(Type::String),
+            "Number" => Some(Type::Number),
+            "String" => Some(Type::String),
             "Boolean" => Some(Type::Boolean),
-            "Object"  => Some(Type::Object),
+            "Object" => Some(Type::Object),
             other if self.types.contains_key(other) => Some(Type::User(other.into())),
             _ => None,
         }
@@ -113,9 +157,16 @@ impl TypeCtx {
         if matches!(a, Type::Error) || matches!(b, Type::Error) {
             return true;
         }
-        if a == b { return true; }
-        if matches!(b, Type::Object) { return true; }
-        if matches!(a, Type::Number | Type::String | Type::Boolean | Type::Object) {
+        if a == b {
+            return true;
+        }
+        if matches!(b, Type::Object) {
+            return true;
+        }
+        if matches!(
+            a,
+            Type::Number | Type::String | Type::Boolean | Type::Object
+        ) {
             return false;
         }
         let mut cur = match a {
@@ -127,8 +178,12 @@ impl TypeCtx {
             _ => return false,
         };
         while let Some(info) = self.types.get(&cur) {
-            if info.parent == target { return true; }
-            if info.parent == "Object" { return false; }
+            if info.parent == target {
+                return true;
+            }
+            if info.parent == "Object" {
+                return false;
+            }
             cur = info.parent.clone();
         }
         false
@@ -138,9 +193,15 @@ impl TypeCtx {
     /// `if`/`elif`/`else` chains (A.5.2) where every branch may produce a
     /// different concrete type.
     pub fn lca(&self, a: &Type, b: &Type) -> Type {
-        if a == b { return a.clone(); }
-        if matches!(a, Type::Error) { return b.clone(); }
-        if matches!(b, Type::Error) { return a.clone(); }
+        if a == b {
+            return a.clone();
+        }
+        if matches!(a, Type::Error) {
+            return b.clone();
+        }
+        if matches!(b, Type::Error) {
+            return a.clone();
+        }
 
         let mut ancestors_a = Vec::new();
         let mut cur = a.clone();

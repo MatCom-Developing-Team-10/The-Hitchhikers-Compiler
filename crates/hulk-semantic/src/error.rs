@@ -16,7 +16,11 @@ pub enum SemError {
     UndefinedType { name: String, span: Span },
 
     #[error("type mismatch: expected `{expected}`, found `{found}`")]
-    Mismatch { expected: String, found: String, span: Span },
+    Mismatch {
+        expected: String,
+        found: String,
+        span: Span,
+    },
 
     #[error("cannot inherit from built-in type `{name}`")]
     InheritBuiltin { name: String, span: Span },
@@ -34,13 +38,25 @@ pub enum SemError {
     OverrideSignatureMismatch { name: String, span: Span },
 
     #[error("wrong number of arguments: expected {expected}, found {found}")]
-    Arity { expected: usize, found: usize, span: Span },
+    Arity {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
 
     #[error("type `{ty}` has no attribute `{name}`")]
-    NoSuchAttribute { ty: String, name: String, span: Span },
+    NoSuchAttribute {
+        ty: String,
+        name: String,
+        span: Span,
+    },
 
     #[error("type `{ty}` has no method `{name}`")]
-    NoSuchMethod { ty: String, name: String, span: Span },
+    NoSuchMethod {
+        ty: String,
+        name: String,
+        span: Span,
+    },
 
     #[error("`self` is not a valid assignment target")]
     SelfAssign { span: Span },

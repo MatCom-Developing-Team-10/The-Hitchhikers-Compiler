@@ -26,9 +26,19 @@ pub struct Checker {
     current_method: Option<MethodScope>,
 }
 
+impl Default for Checker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Checker {
     pub fn new() -> Self {
-        Self { ctx: TypeCtx::new(), errors: Vec::new(), current_method: None }
+        Self {
+            ctx: TypeCtx::new(),
+            errors: Vec::new(),
+            current_method: None,
+        }
     }
 
     // -------------------------------------------------- pass 1: type/func names
@@ -36,7 +46,10 @@ impl Checker {
     pub fn collect(&mut self, prog: &Program) {
         for td in &prog.types {
             if self.ctx.types.contains_key(&td.name) {
-                self.errors.push(SemError::DuplicateType { name: td.name.clone(), span: td.span });
+                self.errors.push(SemError::DuplicateType {
+                    name: td.name.clone(),
+                    span: td.span,
+                });
                 continue;
             }
             let parent = match &td.parent {
@@ -53,13 +66,16 @@ impl Checker {
                 }
                 None => "Object".to_string(),
             };
-            self.ctx.types.insert(td.name.clone(), TypeInfo {
-                parent,
-                ctor_params: Vec::new(),
-                parent_args: td.parent.as_ref().and_then(|p| p.args.clone()),
-                attrs: HashMap::new(),
-                methods: HashMap::new(),
-            });
+            self.ctx.types.insert(
+                td.name.clone(),
+                TypeInfo {
+                    parent,
+                    ctor_params: Vec::new(),
+                    parent_args: td.parent.as_ref().and_then(|p| p.args.clone()),
+                    attrs: HashMap::new(),
+                    methods: HashMap::new(),
+                },
+            );
         }
 
         for td in &prog.types {
@@ -82,9 +98,16 @@ impl Checker {
         let type_names: Vec<String> = self.ctx.types.keys().cloned().collect();
         for tname in &type_names {
             if self.has_cycle(tname) {
-                let span = prog.types.iter().find(|t| &t.name == tname)
-                    .map(|t| t.span).unwrap_or_default();
-                self.errors.push(SemError::CyclicInheritance { name: tname.clone(), span });
+                let span = prog
+                    .types
+                    .iter()
+                    .find(|t| &t.name == tname)
+                    .map(|t| t.span)
+                    .unwrap_or_default();
+                self.errors.push(SemError::CyclicInheritance {
+                    name: tname.clone(),
+                    span,
+                });
                 if let Some(info) = self.ctx.types.get_mut(tname) {
                     info.parent = "Object".into();
                 }
@@ -99,10 +122,13 @@ impl Checker {
                 });
                 continue;
             }
-            self.ctx.funcs.insert(f.name.clone(), FunctionSig {
-                params: vec![Type::Object; f.params.len()],
-                returns: Type::Object,
-            });
+            self.ctx.funcs.insert(
+                f.name.clone(),
+                FunctionSig {
+                    params: vec![Type::Object; f.params.len()],
+                    returns: Type::Object,
+                },
+            );
         }
     }
 
@@ -126,35 +152,56 @@ impl Checker {
 
     pub fn sign(&mut self, prog: &Program) {
         for f in &prog.functions {
-            let params = f.params.iter()
+            let params = f
+                .params
+                .iter()
                 .map(|p| self.resolve_or_default(p.ty.as_deref(), p.span))
                 .collect();
             let returns = match &f.return_ty {
                 Some(n) => self.resolve_or_default(Some(n), f.span),
                 None => Type::Object,
             };
-            self.ctx.funcs.insert(f.name.clone(), FunctionSig { params, returns });
+            self.ctx
+                .funcs
+                .insert(f.name.clone(), FunctionSig { params, returns });
         }
         for td in &prog.types {
-            let ctor_params: Vec<(String, Type)> = td.type_params.iter()
-                .map(|p| (p.name.clone(), self.resolve_or_default(p.ty.as_deref(), p.span)))
+            let ctor_params: Vec<(String, Type)> = td
+                .type_params
+                .iter()
+                .map(|p| {
+                    (
+                        p.name.clone(),
+                        self.resolve_or_default(p.ty.as_deref(), p.span),
+                    )
+                })
                 .collect();
             let mut attrs = HashMap::new();
             for a in &td.attributes {
-                attrs.insert(a.name.clone(), self.resolve_or_default(a.ty.as_deref(), a.span));
+                attrs.insert(
+                    a.name.clone(),
+                    self.resolve_or_default(a.ty.as_deref(), a.span),
+                );
             }
             let mut methods = HashMap::new();
             for m in &td.methods {
-                let params = m.params.iter()
+                let params = m
+                    .params
+                    .iter()
                     .map(|p| self.resolve_or_default(p.ty.as_deref(), p.span))
                     .collect();
                 let returns = match &m.return_ty {
                     Some(n) => self.resolve_or_default(Some(n), m.span),
                     None => Type::Object,
                 };
-                methods.insert(m.name.clone(), MethodSig {
-                    params, returns, owner: td.name.clone(),
-                });
+                methods.insert(
+                    m.name.clone(),
+                    MethodSig {
+                        params,
+                        returns,
+                        owner: td.name.clone(),
+                    },
+                );
             }
             if let Some(info) = self.ctx.types.get_mut(&td.name) {
                 info.ctor_params = ctor_params;
@@ -169,7 +216,10 @@ impl Checker {
             Some(n) => match self.ctx.resolve_name(n) {
                 Some(t) => t,
                 None => {
-                    self.errors.push(SemError::UndefinedType { name: n.into(), span });
+                    self.errors.push(SemError::UndefinedType {
+                        name: n.into(),
+                        span,
+                    });
                     Type::Object
                 }
             },
@@ -181,12 +231,18 @@ impl Checker {
 
     pub fn check_overrides(&mut self, prog: &Program) {
         for td in &prog.types {
-            let parent = self.ctx.types.get(&td.name)
+            let parent = self
+                .ctx
+                .types
+                .get(&td.name)
                 .map(|i| i.parent.clone())
                 .unwrap_or_else(|| "Object".into());
             for m in &td.methods {
                 if let Some(parent_sig) = self.lookup_inherited_method(&parent, &m.name) {
-                    let own_sig = self.ctx.types.get(&td.name)
+                    let own_sig = self
+                        .ctx
+                        .types
+                        .get(&td.name)
                         .and_then(|i| i.methods.get(&m.name))
                         .cloned();
                     if let Some(own_sig) = own_sig {
@@ -205,7 +261,9 @@ impl Checker {
     }
 
     fn lookup_inherited_method(&self, ty: &str, name: &str) -> Option<MethodSig> {
-        if ty == "Object" { return None; }
+        if ty == "Object" {
+            return None;
+        }
         let info = self.ctx.types.get(ty)?;
         if let Some(sig) = info.methods.get(name) {
             return Some(sig.clone());
@@ -214,7 +272,9 @@ impl Checker {
     }
 
     fn lookup_inherited_attr(&self, ty: &str, name: &str) -> Option<Type> {
-        if ty == "Object" { return None; }
+        if ty == "Object" {
+            return None;
+        }
         let info = self.ctx.types.get(ty)?;
         if let Some(t) = info.attrs.get(name) {
             return Some(t.clone());
@@ -226,7 +286,9 @@ impl Checker {
     /// the forwarding rule from A.7.3 (no own `type_params` and no explicit
     /// `inherits Parent(...)` arg list ⇒ use the parent's effective ctor).
     fn effective_ctor_params(&self, tname: &str) -> Vec<Type> {
-        let Some(info) = self.ctx.types.get(tname) else { return Vec::new(); };
+        let Some(info) = self.ctx.types.get(tname) else {
+            return Vec::new();
+        };
         if !info.ctor_params.is_empty() {
             return info.ctor_params.iter().map(|(_, t)| t.clone()).collect();
         }
@@ -244,7 +306,13 @@ impl Checker {
             let sig = self.ctx.funcs.get(&f.name).cloned();
             if let Some(sig) = sig {
                 for (p, pt) in f.params.iter().zip(sig.params.iter()) {
-                    env.define(&p.name, Binding { ty: pt.clone(), span: p.span });
+                    env.define(
+                        &p.name,
+                        Binding {
+                            ty: pt.clone(),
+                            span: p.span,
+                        },
+                    );
                 }
                 let body_ty = self.check_expr(&mut env, &f.body);
                 if f.return_ty.is_some() {
@@ -260,7 +328,13 @@ impl Checker {
                 for a in &td.attributes {
                     let mut env = Env::new();
                     for (pname, pty) in &info.ctor_params {
-                        env.define(pname, Binding { ty: pty.clone(), span: td.span });
+                        env.define(
+                            pname,
+                            Binding {
+                                ty: pty.clone(),
+                                span: td.span,
+                            },
+                        );
                     }
                     let init_ty = self.check_expr(&mut env, &a.init);
                     if let Some(declared) = a.ty.as_ref().and_then(|n| self.ctx.resolve_name(n)) {
@@ -269,14 +343,23 @@ impl Checker {
                 }
                 for m in &td.methods {
                     let mut env = Env::new();
-                    env.define("self", Binding {
-                        ty: Type::User(td.name.clone()),
-                        span: m.span,
-                    });
+                    env.define(
+                        "self",
+                        Binding {
+                            ty: Type::User(td.name.clone()),
+                            span: m.span,
+                        },
+                    );
                     let sig = info.methods.get(&m.name).cloned();
                     if let Some(sig) = sig {
                         for (p, pt) in m.params.iter().zip(sig.params.iter()) {
-                            env.define(&p.name, Binding { ty: pt.clone(), span: p.span });
+                            env.define(
+                                &p.name,
+                                Binding {
+                                    ty: pt.clone(),
+                                    span: p.span,
+                                },
+                            );
                         }
                         self.current_method = Some(MethodScope {
                             owner: td.name.clone(),
@@ -302,7 +385,7 @@ impl Checker {
         match &e.kind {
             ExprKind::Number(_) => Type::Number,
             ExprKind::String(_) => Type::String,
-            ExprKind::Bool(_)   => Type::Boolean,
+            ExprKind::Bool(_) => Type::Boolean,
 
             ExprKind::Ident(name) => match env.lookup(name) {
                 Some(b) => b.ty.clone(),
@@ -338,8 +421,14 @@ impl Checker {
             ExprKind::UnOp(op, x) => {
                 let xt = self.check_expr(env, x);
                 match op {
-                    UnOp::Neg => { self.require(&xt, &Type::Number, x.span); Type::Number }
-                    UnOp::Not => { self.require(&xt, &Type::Boolean, x.span); Type::Boolean }
+                    UnOp::Neg => {
+                        self.require(&xt, &Type::Number, x.span);
+                        Type::Number
+                    }
+                    UnOp::Not => {
+                        self.require(&xt, &Type::Boolean, x.span);
+                        Type::Boolean
+                    }
                 }
             }
 
@@ -433,7 +522,13 @@ impl Checker {
                     None => vt,
                 };
                 env.enter();
-                env.define(name, Binding { ty: bound, span: e.span });
+                env.define(
+                    name,
+                    Binding {
+                        ty: bound,
+                        span: e.span,
+                    },
+                );
                 let bt = self.check_expr(env, body);
                 env.leave();
                 bt
@@ -464,14 +559,20 @@ impl Checker {
             ExprKind::AssignField(recv, name, value) => {
                 let is_self = matches!(recv.kind, ExprKind::SelfExpr);
                 if !is_self {
-                    self.errors.push(SemError::NonSelfFieldAssign { span: e.span });
+                    self.errors
+                        .push(SemError::NonSelfFieldAssign { span: e.span });
                     return Type::Error;
                 }
                 let rt = self.check_expr(env, recv);
                 let vt = self.check_expr(env, value);
-                let Type::User(tn) = &rt else { return Type::Error; };
+                let Type::User(tn) = &rt else {
+                    return Type::Error;
+                };
                 match self.lookup_inherited_attr(tn, name) {
-                    Some(t) => { self.require(&vt, &t, value.span); t }
+                    Some(t) => {
+                        self.require(&vt, &t, value.span);
+                        t
+                    }
                     None => {
                         self.errors.push(SemError::NoSuchAttribute {
                             ty: tn.clone(),
@@ -509,7 +610,13 @@ impl Checker {
                 // require extending `TypeCtx` with a `Protocol` notion.
                 let _ = self.check_expr(env, iter);
                 env.enter();
-                env.define(var, Binding { ty: Type::Number, span: e.span });
+                env.define(
+                    var,
+                    Binding {
+                        ty: Type::Number,
+                        span: e.span,
+                    },
+                );
                 let bt = self.check_expr(env, body);
                 env.leave();
                 bt
@@ -559,10 +666,14 @@ impl Checker {
             ExprKind::Base(args) => {
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(env, a)).collect();
                 let Some(scope) = self.current_method.clone() else {
-                    self.errors.push(SemError::BaseOutsideOverride { span: e.span });
+                    self.errors
+                        .push(SemError::BaseOutsideOverride { span: e.span });
                     return Type::Error;
                 };
-                let parent = self.ctx.types.get(&scope.owner)
+                let parent = self
+                    .ctx
+                    .types
+                    .get(&scope.owner)
                     .map(|i| i.parent.clone())
                     .unwrap_or_else(|| "Object".into());
                 match self.lookup_inherited_method(&parent, &scope.name) {
@@ -571,7 +682,8 @@ impl Checker {
                         sig.returns
                     }
                     None => {
-                        self.errors.push(SemError::BaseNoParentMethod { span: e.span });
+                        self.errors
+                            .push(SemError::BaseNoParentMethod { span: e.span });
                         Type::Error
                     }
                 }
@@ -642,5 +754,9 @@ pub fn analyze(prog: &Program) -> Result<TypeCtx, Vec<SemError>> {
     c.sign(prog);
     c.check_overrides(prog);
     c.check_bodies(prog);
-    if c.errors.is_empty() { Ok(c.ctx) } else { Err(c.errors) }
+    if c.errors.is_empty() {
+        Ok(c.ctx)
+    } else {
+        Err(c.errors)
+    }
 }

@@ -22,7 +22,9 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Self {
-        Self { scopes: vec![HashMap::new()] }
+        Self {
+            scopes: vec![HashMap::new()],
+        }
     }
 
     pub fn enter(&mut self) {

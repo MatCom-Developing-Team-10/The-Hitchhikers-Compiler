@@ -6,24 +6,39 @@
 //! a specific `SemError` variant.
 
 use hulk_semantic::ast::*;
-use hulk_semantic::{analyze, SemError};
+use hulk_semantic::{SemError, analyze};
 
 // ---------- small helpers ----------
 
 fn e(kind: ExprKind) -> Expr {
-    Expr { span: Span::default(), kind }
+    Expr {
+        span: Span::default(),
+        kind,
+    }
 }
 
-fn n(v: f64) -> Expr { e(ExprKind::Number(v)) }
-fn s(v: &str) -> Expr { e(ExprKind::String(v.into())) }
-fn id(name: &str) -> Expr { e(ExprKind::Ident(name.into())) }
-fn call(name: &str, args: Vec<Expr>) -> Expr { e(ExprKind::Call(name.into(), args)) }
+fn n(v: f64) -> Expr {
+    e(ExprKind::Number(v))
+}
+fn s(v: &str) -> Expr {
+    e(ExprKind::String(v.into()))
+}
+fn id(name: &str) -> Expr {
+    e(ExprKind::Ident(name.into()))
+}
+fn call(name: &str, args: Vec<Expr>) -> Expr {
+    e(ExprKind::Call(name.into(), args))
+}
 fn binop(op: BinOp, l: Expr, r: Expr) -> Expr {
     e(ExprKind::BinOp(op, Box::new(l), Box::new(r)))
 }
 
 fn prog(entry: Expr) -> Program {
-    Program { types: vec![], functions: vec![], entry }
+    Program {
+        types: vec![],
+        functions: vec![],
+        entry,
+    }
 }
 
 // ---------- positive: arithmetic, strings, let, if, while ----------
@@ -31,18 +46,20 @@ fn prog(entry: Expr) -> Program {
 #[test]
 fn arithmetic_typechecks() {
     // print((1 + 2) * 3)
-    let p = prog(call("print", vec![
-        binop(BinOp::Mul, binop(BinOp::Add, n(1.0), n(2.0)), n(3.0)),
-    ]));
+    let p = prog(call(
+        "print",
+        vec![binop(BinOp::Mul, binop(BinOp::Add, n(1.0), n(2.0)), n(3.0))],
+    ));
     assert!(analyze(&p).is_ok());
 }
 
 #[test]
 fn string_concat_typechecks() {
     // print("life is " @ 42)
-    let p = prog(call("print", vec![
-        binop(BinOp::Concat, s("life is "), n(42.0)),
-    ]));
+    let p = prog(call(
+        "print",
+        vec![binop(BinOp::Concat, s("life is "), n(42.0))],
+    ));
     assert!(analyze(&p).is_ok());
 }
 
@@ -123,16 +140,39 @@ fn type_attributes_and_method() {
     let point = TypeDecl {
         name: "Point".into(),
         type_params: vec![
-            Param { name: "x".into(), ty: Some("Number".into()), span: Span::default() },
-            Param { name: "y".into(), ty: Some("Number".into()), span: Span::default() },
+            Param {
+                name: "x".into(),
+                ty: Some("Number".into()),
+                span: Span::default(),
+            },
+            Param {
+                name: "y".into(),
+                ty: Some("Number".into()),
+                span: Span::default(),
+            },
         ],
         parent: None,
         attributes: vec![
-            AttrDecl { name: "x".into(), ty: Some("Number".into()), init: id("x"), span: Span::default() },
-            AttrDecl { name: "y".into(), ty: Some("Number".into()), init: id("y"), span: Span::default() },
+            AttrDecl {
+                name: "x".into(),
+                ty: Some("Number".into()),
+                init: id("x"),
+                span: Span::default(),
+            },
+            AttrDecl {
+                name: "y".into(),
+                ty: Some("Number".into()),
+                init: id("y"),
+                span: Span::default(),
+            },
         ],
-        methods: vec![method("getX", Some("Number"),
-            e(ExprKind::GetField(Box::new(e(ExprKind::SelfExpr)), "x".into())),
+        methods: vec![method(
+            "getX",
+            Some("Number"),
+            e(ExprKind::GetField(
+                Box::new(e(ExprKind::SelfExpr)),
+                "x".into(),
+            )),
         )],
         span: Span::default(),
     };
@@ -171,7 +211,9 @@ fn inheritance_with_base_call() {
             span: Span::default(),
         }),
         attributes: vec![],
-        methods: vec![method("greet", Some("String"),
+        methods: vec![method(
+            "greet",
+            Some("String"),
             binop(BinOp::Concat, s("sir "), e(ExprKind::Base(vec![]))),
         )],
         span: Span::default(),
@@ -192,7 +234,11 @@ fn inheritance_with_base_call() {
 // ---------- negative: every SemError variant we can reach by construction --
 
 fn first_err(p: &Program) -> SemError {
-    analyze(p).expect_err("expected at least one error").into_iter().next().unwrap()
+    analyze(p)
+        .expect_err("expected at least one error")
+        .into_iter()
+        .next()
+        .unwrap()
 }
 
 #[test]
@@ -233,9 +279,16 @@ fn cannot_inherit_from_builtin() {
         methods: vec![],
         span: Span::default(),
     };
-    let p = Program { types: vec![bad], functions: vec![], entry: n(0.0) };
+    let p = Program {
+        types: vec![bad],
+        functions: vec![],
+        entry: n(0.0),
+    };
     let errs = analyze(&p).unwrap_err();
-    assert!(errs.iter().any(|x| matches!(x, SemError::InheritBuiltin { .. })));
+    assert!(
+        errs.iter()
+            .any(|x| matches!(x, SemError::InheritBuiltin { .. }))
+    );
 }
 
 #[test]
@@ -262,9 +315,16 @@ fn override_with_different_signature() {
         methods: vec![method("f", Some("String"), s("x"))],
         span: Span::default(),
     };
-    let p = Program { types: vec![p_type, q_type], functions: vec![], entry: n(0.0) };
+    let p = Program {
+        types: vec![p_type, q_type],
+        functions: vec![],
+        entry: n(0.0),
+    };
     let errs = analyze(&p).unwrap_err();
-    assert!(errs.iter().any(|x| matches!(x, SemError::OverrideSignatureMismatch { .. })));
+    assert!(
+        errs.iter()
+            .any(|x| matches!(x, SemError::OverrideSignatureMismatch { .. }))
+    );
 }
 
 #[test]
@@ -276,8 +336,13 @@ fn self_assign_is_rejected() {
         type_params: vec![],
         parent: None,
         attributes: vec![],
-        methods: vec![method("f", None,
-            e(ExprKind::Assign("self".into(), Box::new(e(ExprKind::New("T".into(), vec![]))))),
+        methods: vec![method(
+            "f",
+            None,
+            e(ExprKind::Assign(
+                "self".into(),
+                Box::new(e(ExprKind::New("T".into(), vec![]))),
+            )),
         )],
         span: Span::default(),
     };
@@ -291,18 +356,32 @@ fn self_assign_is_rejected() {
         )),
     };
     let errs = analyze(&p).unwrap_err();
-    assert!(errs.iter().any(|x| matches!(x, SemError::SelfAssign { .. })));
+    assert!(
+        errs.iter()
+            .any(|x| matches!(x, SemError::SelfAssign { .. }))
+    );
 }
 
 #[test]
 fn duplicate_type_reported() {
     let dup = |n: &str| TypeDecl {
-        name: n.into(), type_params: vec![], parent: None,
-        attributes: vec![], methods: vec![], span: Span::default(),
+        name: n.into(),
+        type_params: vec![],
+        parent: None,
+        attributes: vec![],
+        methods: vec![],
+        span: Span::default(),
     };
-    let p = Program { types: vec![dup("X"), dup("X")], functions: vec![], entry: n(0.0) };
+    let p = Program {
+        types: vec![dup("X"), dup("X")],
+        functions: vec![],
+        entry: n(0.0),
+    };
     let errs = analyze(&p).unwrap_err();
-    assert!(errs.iter().any(|x| matches!(x, SemError::DuplicateType { .. })));
+    assert!(
+        errs.iter()
+            .any(|x| matches!(x, SemError::DuplicateType { .. }))
+    );
 }
 
 #[test]
@@ -343,9 +422,10 @@ fn base_outside_override_is_rejected() {
 fn errors_do_not_cascade() {
     // print(undefined_var + 1)
     // We expect ONE error (UndefinedVariable), not a cascade like "+ expects Number".
-    let p = prog(call("print", vec![
-        binop(BinOp::Add, id("undefined_var"), n(1.0)),
-    ]));
+    let p = prog(call(
+        "print",
+        vec![binop(BinOp::Add, id("undefined_var"), n(1.0))],
+    ));
     let errs = analyze(&p).unwrap_err();
     assert_eq!(errs.len(), 1, "expected single error, got: {errs:?}");
     assert!(matches!(errs[0], SemError::UndefinedVariable { .. }));

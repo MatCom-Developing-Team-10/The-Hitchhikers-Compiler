@@ -46,10 +46,16 @@ pub struct Span {
 
 impl Span {
     pub fn new(lo: usize, hi: usize) -> Self {
-        Self { lo: lo as u32, hi: hi as u32 }
+        Self {
+            lo: lo as u32,
+            hi: hi as u32,
+        }
     }
     pub fn join(self, other: Span) -> Span {
-        Span { lo: self.lo.min(other.lo), hi: self.hi.max(other.hi) }
+        Span {
+            lo: self.lo.min(other.lo),
+            hi: self.hi.max(other.hi),
+        }
     }
 }
 
@@ -173,21 +179,43 @@ pub enum ExprKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Pow, Mod,
-    Concat, ConcatWs,
-    Eq, Ne, Lt, Le, Gt, Ge,
-    And, Or,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Pow,
+    Mod,
+    Concat,
+    ConcatWs,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
 }
 
 impl BinOp {
     pub fn as_str(self) -> &'static str {
         match self {
-            BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*",
-            BinOp::Div => "/", BinOp::Pow => "^", BinOp::Mod => "%",
-            BinOp::Concat => "@", BinOp::ConcatWs => "@@",
-            BinOp::Eq => "==", BinOp::Ne => "!=",
-            BinOp::Lt => "<", BinOp::Le => "<=", BinOp::Gt => ">", BinOp::Ge => ">=",
-            BinOp::And => "&", BinOp::Or => "|",
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "/",
+            BinOp::Pow => "^",
+            BinOp::Mod => "%",
+            BinOp::Concat => "@",
+            BinOp::ConcatWs => "@@",
+            BinOp::Eq => "==",
+            BinOp::Ne => "!=",
+            BinOp::Lt => "<",
+            BinOp::Le => "<=",
+            BinOp::Gt => ">",
+            BinOp::Ge => ">=",
+            BinOp::And => "&",
+            BinOp::Or => "|",
         }
     }
 }

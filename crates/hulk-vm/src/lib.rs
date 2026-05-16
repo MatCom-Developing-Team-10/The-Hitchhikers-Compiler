@@ -15,6 +15,7 @@ pub enum VmError {
 
 #[derive(Default)]
 pub struct Vm {
+    #[allow(dead_code)]
     stack: Vec<f64>,
 }
 
