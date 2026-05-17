@@ -10,11 +10,9 @@
 //!
 //! ## AST dependency
 //!
-//! The semantic analyzer operates on a tree of [`ast::Expr`] / [`ast::Program`]
-//! values. Those types are currently **vendored locally** in [`ast`] while
-//! role A finalizes the design of the `hulk-ast` crate. The vendored module
-//! is the formal proposal B is bringing to the team. When `hulk-ast` exposes
-//! the same types, swap every `use crate::ast` for `use hulk_ast`.
+//! The semantic analyzer operates on the shared [`hulk_ast`] types
+//! (`Program`, `Expr`, `ExprKind`, etc.), re-exported here as [`ast`] for
+//! internal convenience.
 //!
 //! ## Pipeline
 //!
@@ -36,7 +34,7 @@
 //!
 //! See [`analyze`] for the canonical entry point.
 
-pub mod ast;
+pub use hulk_ast as ast;
 pub mod check;
 pub mod env;
 pub mod error;

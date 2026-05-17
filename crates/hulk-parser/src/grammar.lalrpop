@@ -1,9 +1,555 @@
-// HULK grammar — skeleton.
+// HULK grammar — complete (A.2–A.8).
 //
-// This file is processed by build.rs into src/grammar.rs.
-// Rule of thumb: keep this small until the AST contract in `hulk-ast` is
-// stable, then grow it section by section (A.1 -> A.9 -> OOP -> extension).
+// Processed by build.rs into src/grammar.rs.
+// Uses an external lexer from hulk-lexer (logos-based).
 
-grammar;
+use hulk_ast::*;
+use hulk_lexer::{Token, LexError, parse_number, parse_string};
+use crate::TypeMemberKind;
 
-pub Num: i64 = <s:r"[0-9]+"> => s.parse().unwrap();
+grammar<'input>(input: &'input str);
+
+extern {
+    type Location = usize;
+    type Error = LexError;
+
+    enum Token {
+        // Keywords
+        "let"      => Token::Let,
+        "in"       => Token::In,
+        "if"       => Token::If,
+        "elif"     => Token::Elif,
+        "else"     => Token::Else,
+        "while"    => Token::While,
+        "for"      => Token::For,
+        "function" => Token::Function,
+        "type"     => Token::Type,
+        "inherits" => Token::Inherits,
+        "new"      => Token::New,
+        "is"       => Token::Is,
+        "as"       => Token::As,
+        "true"     => Token::True,
+        "false"    => Token::False,
+
+        // Operators
+        "+"  => Token::Plus,
+        "-"  => Token::Minus,
+        "*"  => Token::Star,
+        "/"  => Token::Slash,
+        "^"  => Token::Caret,
+        "%"  => Token::Percent,
+        "@@" => Token::AtAt,
+        "@"  => Token::At,
+        "==" => Token::EqEq,
+        "!=" => Token::BangEq,
+        "<=" => Token::LtEq,
+        "<"  => Token::Lt,
+        ">=" => Token::GtEq,
+        ">"  => Token::Gt,
+        "&"  => Token::Amp,
+        "|"  => Token::Pipe,
+        "!"  => Token::Bang,
+        ":=" => Token::ColonEq,
+        "=>" => Token::FatArrow,
+        "="  => Token::Eq,
+
+        // Punctuation
+        "(" => Token::LParen,
+        ")" => Token::RParen,
+        "{" => Token::LBrace,
+        "}" => Token::RBrace,
+        ";" => Token::Semi,
+        "," => Token::Comma,
+        "." => Token::Dot,
+        ":" => Token::Colon,
+
+        // Literals & Ident
+        NumLit    => Token::Number,
+        StringLit => Token::StringLit,
+        IdentTok  => Token::Ident,
+    }
+}
+
+// =====================================================================
+// Utility macros
+// =====================================================================
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => { v.push(e); v }
+    }
+};
+
+Comma1<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T> => { v.push(e); v }
+};
+
+// Extract the source slice for an identifier token.
+IdentStr: &'input str = <lo:@L> IdentTok <hi:@R> => &input[lo..hi];
+
+// Type annotation: just a type name for now.
+TypeAnnotation: String = <name:IdentStr> => name.to_string();
+
+// =====================================================================
+// Top-level: Program
+// =====================================================================
+
+pub Program: Program = {
+    <types:TypeDecl*> <functions:FunctionDecl*> <entry:Expr> ";"? => {
+        Program { types, functions, entry }
+    },
+};
+
+// =====================================================================
+// Type declarations (A.7)
+// =====================================================================
+
+TypeDecl: TypeDecl = {
+    // type Name(params) [inherits Parent(args)] { body }
+    <lo:@L> "type" <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
+        <parent:InheritsClause?>
+        "{" <body:TypeBody> "}" <hi:@R> => {
+        TypeDecl {
+            name: name.to_string(),
+            type_params: params,
+            parent,
+            attributes: body.0,
+            methods: body.1,
+            span: Span::new(lo, hi),
+        }
+    },
+    // type Name [inherits Parent(args)] { body }  (no constructor params)
+    <lo:@L> "type" <name:IdentStr>
+        <parent:InheritsClause?>
+        "{" <body:TypeBody> "}" <hi:@R> => {
+        TypeDecl {
+            name: name.to_string(),
+            type_params: vec![],
+            parent,
+            attributes: body.0,
+            methods: body.1,
+            span: Span::new(lo, hi),
+        }
+    },
+};
+
+TypeParam: Param = {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> <hi:@R> => {
+        Param { name: name.to_string(), ty, span: Span::new(lo, hi) }
+    },
+};
+
+InheritsClause: ParentSpec = {
+    <lo:@L> "inherits" <name:IdentStr> "(" <args:Comma<Expr>> ")" <hi:@R> => {
+        ParentSpec { name: name.to_string(), args: Some(args), span: Span::new(lo, hi) }
+    },
+    <lo:@L> "inherits" <name:IdentStr> <hi:@R> => {
+        ParentSpec { name: name.to_string(), args: None, span: Span::new(lo, hi) }
+    },
+};
+
+TypeBody: (Vec<AttrDecl>, Vec<MethodDecl>) = {
+    <members:TypeMember*> => {
+        let mut attrs = Vec::new();
+        let mut methods = Vec::new();
+        for m in members {
+            match m {
+                TypeMemberKind::Attr(a) => attrs.push(a),
+                TypeMemberKind::Method(m) => methods.push(m),
+            }
+        }
+        (attrs, methods)
+    }
+};
+
+TypeMember: TypeMemberKind = {
+    <a:AttrDecl> => TypeMemberKind::Attr(a),
+    <m:MethodDecl> => TypeMemberKind::Method(m),
+};
+
+AttrDecl: AttrDecl = {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> "=" <init:Expr> ";" <hi:@R> => {
+        AttrDecl {
+            name: name.to_string(),
+            ty,
+            init,
+            span: Span::new(lo, hi),
+        }
+    },
+};
+
+MethodDecl: MethodDecl = {
+    // Inline: name(params)[: RetTy] => expr;
+    <lo:@L> <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
+        <ret:(":" <TypeAnnotation>)?> "=>" <body:Expr> ";" <hi:@R> => {
+        MethodDecl {
+            name: name.to_string(),
+            params,
+            return_ty: ret,
+            body,
+            span: Span::new(lo, hi),
+        }
+    },
+    // Block: name(params)[: RetTy] { body }
+    <lo:@L> <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
+        <ret:(":" <TypeAnnotation>)?> <body:BlockExpr> <hi:@R> => {
+        MethodDecl {
+            name: name.to_string(),
+            params,
+            return_ty: ret,
+            body,
+            span: Span::new(lo, hi),
+        }
+    },
+};
+
+// =====================================================================
+// Function declarations (A.3)
+// =====================================================================
+
+FunctionDecl: FunctionDecl = {
+    // Inline: function name(params)[: RetTy] => expr;
+    <lo:@L> "function" <name:IdentStr> "(" <params:Comma<FuncParam>> ")"
+        <ret:(":" <TypeAnnotation>)?> "=>" <body:Expr> ";" <hi:@R> => {
+        FunctionDecl {
+            name: name.to_string(),
+            params,
+            return_ty: ret,
+            body,
+            span: Span::new(lo, hi),
+        }
+    },
+    // Block: function name(params)[: RetTy] { body }
+    <lo:@L> "function" <name:IdentStr> "(" <params:Comma<FuncParam>> ")"
+        <ret:(":" <TypeAnnotation>)?> <body:BlockExpr> <hi:@R> => {
+        FunctionDecl {
+            name: name.to_string(),
+            params,
+            return_ty: ret,
+            body,
+            span: Span::new(lo, hi),
+        }
+    },
+};
+
+FuncParam: Param = {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> <hi:@R> => {
+        Param { name: name.to_string(), ty, span: Span::new(lo, hi) }
+    },
+};
+
+// =====================================================================
+// Expressions — precedence climbing
+// =====================================================================
+
+// Level 0: top-level expression (let, assign, control flow, or binary)
+pub Expr: Expr = {
+    LetExpr,
+    AssignExpr,
+    ControlOrBinary,
+};
+
+// Control flow OR binary expressions.
+// This is the "body" level for if/while/for: control flow can nest
+// directly, but to use control flow inside binary ops you need parens.
+ControlOrBinary: Expr = {
+    IfExpr,
+    WhileExpr,
+    ForExpr,
+    OrExpr,
+};
+
+// ---- Let expression (A.4) ----
+LetExpr: Expr = {
+    <lo:@L> "let" <bindings:Comma1<LetBinding>> "in" <body:Expr> <hi:@R> => {
+        // Desugar multi-let: fold right to produce nested Let nodes
+        bindings.into_iter().rev().fold(body, |acc, (name, ty, init, bspan)| {
+            Expr {
+                span: Span::new(bspan.lo as usize, hi),
+                kind: ExprKind::Let(name, ty, Box::new(init), Box::new(acc)),
+            }
+        })
+    },
+};
+
+LetBinding: (String, Option<String>, Expr, Span) = {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> "=" <init:ControlOrBinary> <hi:@R> => {
+        (name.to_string(), ty, init, Span::new(lo, hi))
+    },
+};
+
+// ---- Assignment (A.4.6) ----
+AssignExpr: Expr = {
+    // Variable assignment: x := expr
+    <lo:@L> <name:IdentStr> ":=" <val:Expr> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::Assign(name.to_string(), Box::new(val)),
+        }
+    },
+    // Field assignment: expr.field := expr
+    <lo:@L> <obj:PostfixExpr> "." <field:IdentStr> ":=" <val:Expr> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::AssignField(Box::new(obj), field.to_string(), Box::new(val)),
+        }
+    },
+};
+
+// Level 1: logical or
+OrExpr: Expr = {
+    <lo:@L> <lhs:OrExpr> "|" <rhs:AndExpr> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::BinOp(BinOp::Or, Box::new(lhs), Box::new(rhs)),
+        }
+    },
+    AndExpr,
+};
+
+// Level 2: logical and
+AndExpr: Expr = {
+    <lo:@L> <lhs:AndExpr> "&" <rhs:NotExpr> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::BinOp(BinOp::And, Box::new(lhs), Box::new(rhs)),
+        }
+    },
+    NotExpr,
+};
+
+// Level 3: logical not (prefix)
+NotExpr: Expr = {
+    <lo:@L> "!" <e:NotExpr> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::UnOp(UnOp::Not, Box::new(e)),
+        }
+    },
+    CompareExpr,
+};
+
+// Level 4: comparison (non-associative)
+CompareExpr: Expr = {
+    <lo:@L> <lhs:TypeOpExpr> "==" <rhs:TypeOpExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Eq, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:TypeOpExpr> "!=" <rhs:TypeOpExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Ne, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:TypeOpExpr> "<" <rhs:TypeOpExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Lt, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:TypeOpExpr> "<=" <rhs:TypeOpExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Le, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:TypeOpExpr> ">" <rhs:TypeOpExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Gt, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:TypeOpExpr> ">=" <rhs:TypeOpExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Ge, Box::new(lhs), Box::new(rhs)) }
+    },
+    TypeOpExpr,
+};
+
+// Level 5: type operations (is, as)
+TypeOpExpr: Expr = {
+    <lo:@L> <e:ConcatExpr> "is" <ty:IdentStr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::Is(Box::new(e), ty.to_string()) }
+    },
+    <lo:@L> <e:ConcatExpr> "as" <ty:IdentStr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::As(Box::new(e), ty.to_string()) }
+    },
+    ConcatExpr,
+};
+
+// Level 6: string concatenation (right-associative)
+ConcatExpr: Expr = {
+    <lo:@L> <lhs:AddExpr> "@" <rhs:ConcatExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Concat, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:AddExpr> "@@" <rhs:ConcatExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::ConcatWs, Box::new(lhs), Box::new(rhs)) }
+    },
+    AddExpr,
+};
+
+// Level 7: addition / subtraction (left-associative)
+AddExpr: Expr = {
+    <lo:@L> <lhs:AddExpr> "+" <rhs:MulExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Add, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:AddExpr> "-" <rhs:MulExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Sub, Box::new(lhs), Box::new(rhs)) }
+    },
+    MulExpr,
+};
+
+// Level 8: multiplication / division / modulo (left-associative)
+MulExpr: Expr = {
+    <lo:@L> <lhs:MulExpr> "*" <rhs:PowExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Mul, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:MulExpr> "/" <rhs:PowExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Div, Box::new(lhs), Box::new(rhs)) }
+    },
+    <lo:@L> <lhs:MulExpr> "%" <rhs:PowExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Mod, Box::new(lhs), Box::new(rhs)) }
+    },
+    PowExpr,
+};
+
+// Level 9: power (right-associative)
+PowExpr: Expr = {
+    <lo:@L> <base:UnaryExpr> "^" <exp:PowExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
+    },
+    UnaryExpr,
+};
+
+// Level 10: unary prefix (negation)
+UnaryExpr: Expr = {
+    <lo:@L> "-" <e:UnaryExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::UnOp(UnOp::Neg, Box::new(e)) }
+    },
+    PostfixExpr,
+};
+
+// Level 11: postfix (member access, method call)
+PostfixExpr: Expr = {
+    // Method call: expr.name(args)
+    <lo:@L> <obj:PostfixExpr> "." <name:IdentStr> "(" <args:Comma<Expr>> ")" <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::MethodCall(Box::new(obj), name.to_string(), args),
+        }
+    },
+    // Field access: expr.name
+    <lo:@L> <obj:PostfixExpr> "." <name:IdentStr> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::GetField(Box::new(obj), name.to_string()),
+        }
+    },
+    AtomExpr,
+};
+
+// Level 12: atoms (self-delimiting expressions)
+AtomExpr: Expr = {
+    // Number literal
+    <lo:@L> NumLit <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::Number(parse_number(&input[lo..hi])),
+        }
+    },
+    // String literal
+    <lo:@L> StringLit <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::String(parse_string(&input[lo..hi])),
+        }
+    },
+    // Boolean literals
+    <lo:@L> "true" <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::Bool(true) }
+    },
+    <lo:@L> "false" <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::Bool(false) }
+    },
+    // Parenthesized expression (allows control flow inside binary ops)
+    "(" <Expr> ")",
+    // Block expression
+    BlockExpr,
+    // New expression
+    NewExpr,
+    // Function call, base(), self, or plain identifier
+    CallOrIdentExpr,
+};
+
+// Function call, base(), self, or plain identifier
+CallOrIdentExpr: Expr = {
+    // Call: name(args) — also handles base(args)
+    <lo:@L> <name:IdentStr> "(" <args:Comma<Expr>> ")" <hi:@R> => {
+        let span = Span::new(lo, hi);
+        if name == "base" {
+            Expr { span, kind: ExprKind::Base(args) }
+        } else {
+            Expr { span, kind: ExprKind::Call(name.to_string(), args) }
+        }
+    },
+    // Identifier or self
+    <lo:@L> <name:IdentStr> <hi:@R> => {
+        let span = Span::new(lo, hi);
+        if name == "self" {
+            Expr { span, kind: ExprKind::SelfExpr }
+        } else {
+            Expr { span, kind: ExprKind::Ident(name.to_string()) }
+        }
+    },
+};
+
+// =====================================================================
+// Compound expressions (control flow)
+// =====================================================================
+
+// Block: { expr; expr; ... expr? }
+BlockExpr: Expr = {
+    <lo:@L> "{" <mut stmts:(<Expr> ";")*> <last:Expr?> "}" <hi:@R> => {
+        if let Some(e) = last {
+            stmts.push(e);
+        }
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::Block(stmts),
+        }
+    },
+};
+
+// If / elif / else (A.5)
+IfExpr: Expr = {
+    <lo:@L> "if" "(" <cond:Expr> ")" <then:ControlOrBinary>
+        <elifs:("elif" "(" <Expr> ")" <ControlOrBinary>)*>
+        "else" <else_:ControlOrBinary> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::If(
+                Box::new(cond),
+                Box::new(then),
+                elifs,
+                Box::new(else_),
+            ),
+        }
+    },
+};
+
+// While loop (A.6.1)
+WhileExpr: Expr = {
+    <lo:@L> "while" "(" <cond:Expr> ")" <body:ControlOrBinary> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::While(Box::new(cond), Box::new(body)),
+        }
+    },
+};
+
+// For loop (A.6.2)
+ForExpr: Expr = {
+    <lo:@L> "for" "(" <name:IdentStr> "in" <iter:Expr> ")" <body:ControlOrBinary> <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::For(name.to_string(), Box::new(iter), Box::new(body)),
+        }
+    },
+};
+
+// New expression (A.7.2)
+NewExpr: Expr = {
+    <lo:@L> "new" <name:IdentStr> "(" <args:Comma<Expr>> ")" <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::New(name.to_string(), args),
+        }
+    },
+};

@@ -291,6 +291,7 @@ dependencies = [
 name = "hulk-semantic"
 version = "0.1.0"
 dependencies = [
+ "hulk-ast",
  "thiserror",
 ]
 
