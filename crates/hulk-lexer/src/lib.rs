@@ -73,6 +73,9 @@ pub enum Token {
     /// `-` subtraction / unary negation.
     #[token("-")]
     Minus,
+    /// `**` power (alias for `^`, must come before `*`).
+    #[token("**")]
+    StarStar,
     /// `*` multiplication.
     #[token("*")]
     Star,
@@ -190,6 +193,7 @@ impl fmt::Display for Token {
             Token::False => write!(f, "false"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
+            Token::StarStar => write!(f, "**"),
             Token::Star => write!(f, "*"),
             Token::Slash => write!(f, "/"),
             Token::Caret => write!(f, "^"),

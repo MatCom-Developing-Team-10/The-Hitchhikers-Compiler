@@ -82,6 +82,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_double_star_as_power() {
+        // `**` is an alias for `^` per spec example in A.3.1
+        let prog = parse("2 ** 3;").unwrap();
+        assert!(matches!(prog.entry.kind, ExprKind::BinOp(BinOp::Pow, _, _)));
+    }
+
+    #[test]
+    fn parses_double_star_right_associative() {
+        // 2 ** 3 ** 4 should be 2 ** (3 ** 4)
+        let prog = parse("2 ** 3 ** 4;").unwrap();
+        if let ExprKind::BinOp(BinOp::Pow, _base, exp) = &prog.entry.kind {
+            assert!(matches!(exp.kind, ExprKind::BinOp(BinOp::Pow, _, _)));
+        } else {
+            panic!("expected Pow at top level");
+        }
+    }
+
+    #[test]
     fn parses_concat_right_associative() {
         let prog = parse(r#""a" @ "b" @ "c";"#).unwrap();
         if let ExprKind::BinOp(BinOp::Concat, _lhs, rhs) = &prog.entry.kind {

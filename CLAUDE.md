@@ -171,12 +171,29 @@ fn main() -> anyhow::Result<()> { ... }
 
 | Archivo | Contenido |
 |---------|-----------|
+| `docs/LEXER_REFERENCE.md` | **Referencia del lexer:** todos los tokens, API publica, protocolo LALRpop, limitaciones |
+| `docs/PARSER_REFERENCE.md` | **Referencia del parser/AST:** nodos ExprKind, operadores, precedencia, API publica |
 | `docs/PLAN.md` | Timeline de 4 semanas, milestones, gestion de riesgos |
 | `docs/SEMANTIC_GUIDE.md` | Guia tecnica de evaluacion del modulo semantico |
 | `docs/SEMANTIC_REPORT.md` | Reporte de implementacion: decisiones, interfaces, limitaciones |
 | `docs/Orientacion del Proyecto.md` | Requisitos del curso, entregables, evaluacion |
 | `docs/Hulk - The Book.pdf` | Especificacion oficial del lenguaje HULK |
 | `docs/Hulk - Required Spec.pdf` | Documento de requisitos formales |
+
+> **Para entender el lexer o el parser, leer primero los archivos de referencia anteriores — no el codigo fuente.** Esto ahorra tokens y tiempo.
+
+---
+
+## Regla de documentacion obligatoria
+
+Cualquier cambio en `hulk-lexer`, `hulk-parser` o `hulk-ast` **DEBE** incluir en el mismo commit la actualizacion del archivo de referencia correspondiente:
+
+- Cambios en `hulk-lexer` → actualizar `docs/LEXER_REFERENCE.md`
+- Cambios en `hulk-parser` o `hulk-ast` → actualizar `docs/PARSER_REFERENCE.md`
+
+Esto incluye: nuevos tokens, cambios de regex, nuevas variantes de ExprKind/BinOp, cambios en precedencia, nuevos nodos de declaracion, cambios en la API publica, y cualquier decision de diseno nueva.
+
+**Sin esta actualizacion, el agente trabajara con informacion incorrecta.** El CI no verifica esto, es responsabilidad del equipo.
 
 ---
 

@@ -34,6 +34,7 @@ extern {
         // Operators
         "+"  => Token::Plus,
         "-"  => Token::Minus,
+        "**" => Token::StarStar,
         "*"  => Token::Star,
         "/"  => Token::Slash,
         "^"  => Token::Caret,
@@ -400,9 +401,12 @@ MulExpr: Expr = {
     PowExpr,
 };
 
-// Level 9: power (right-associative)
+// Level 9: power (right-associative). Both `^` and `**` are accepted per spec.
 PowExpr: Expr = {
     <lo:@L> <base:UnaryExpr> "^" <exp:PowExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
+    },
+    <lo:@L> <base:UnaryExpr> "**" <exp:PowExpr> <hi:@R> => {
         Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
     },
     UnaryExpr,
