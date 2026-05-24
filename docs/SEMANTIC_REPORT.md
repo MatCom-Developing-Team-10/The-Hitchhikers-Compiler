@@ -17,23 +17,16 @@
 Esta entrega **no toca** ningún módulo fuera de `crates/hulk-semantic/`. La
 única dependencia inter-rol es el **contrato AST** que B negocia con A,
 documentado y formalizado como código Rust en
-[`crates/hulk-semantic/src/ast.rs`](../crates/hulk-semantic/src/ast.rs).
+[`crates/hulk-ast/src/lib.rs`](../crates/hulk-ast/src/lib.rs).
 
 ---
 
 ## 2. Workflow de equipo — contrato AST
 
-Mientras A finaliza `hulk-ast`, B trabaja contra una copia local del AST
-vendoreada en [`hulk-semantic/src/ast.rs`](../crates/hulk-semantic/src/ast.rs).
-Ese archivo es:
-
-1. **La especificación formal** que B trae a la reunión de coordinación con A
-   para definir el AST compartido.
-2. **Código Rust compilable** que permite a B desarrollar y testear el
-   semántico sin esperar a A.
-3. **Reemplazable en una sola línea**: cuando A entregue `hulk-ast` con estos
-   tipos, B cambia cinco `use crate::ast::*` por `use hulk_ast::*` y elimina
-   el archivo local.
+El AST es el **contrato inter-módulo** que conecta frontend (lexer/parser) con
+las fases posteriores (semántico, IR). En este repo, el contrato vive en el
+crate compartido [`hulk-ast`](../crates/hulk-ast/src/lib.rs), y `hulk-semantic`
+lo consume directamente.
 
 El AST contractual cubre los nodos requeridos por A.1–A.8 del libro HULK más
 las construcciones OOP (tipos, herencia, `self`, `base`, `is`, `as`).
@@ -54,16 +47,15 @@ las construcciones OOP (tipos, herencia, `self`, `base`, `is`, `as`).
 
 ```
 crates/hulk-semantic/
-├── Cargo.toml          (sólo depende de thiserror; SIN hulk-ast por ahora)
+├── Cargo.toml          (depende del contrato AST en `hulk-ast` + `thiserror`)
 ├── src/
 │   ├── lib.rs          re-exports + doc del pipeline
-│   ├── ast.rs          contrato AST temporal (a entregar a A)
 │   ├── env.rs          Env = pila de HashMap<String, Binding>
 │   ├── types.rs        Type, TypeCtx, conforms(), lca()
-│   ├── error.rs        SemError (16 variantes)
+│   ├── error.rs        SemError (diagnósticos)
 │   └── check.rs        Checker: 3 pasadas + check_expr
 └── tests/
-    └── integration.rs  15 tests construyendo AST directamente
+  └── integration.rs  tests construyendo AST directamente
 ```
 
 | Archivo | LOC aprox. |

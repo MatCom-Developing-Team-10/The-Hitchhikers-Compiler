@@ -28,11 +28,8 @@ fuente &str  →  Lexer  →  LALRpop  →  Program (AST)
 /// Alias para el tipo de error de LALRpop con los tipos del compilador HULK.
 pub type ParseError<'input> = lalrpop_util::ParseError<usize, Token, LexError>;
 
-/// Discriminante interno para separar atributos de metodos en TypeDecl.
-pub enum TypeMemberKind {
-    Attr(AttrDecl),
-    Method(MethodDecl),
-}
+// Nota: `TypeMemberKind` existe, pero es un helper interno del crate
+// (no forma parte de la API pública).
 
 /// Punto de entrada del parser. Crea un Lexer internamente.
 pub fn parse(source: &str) -> Result<Program, ParseError<'_>>

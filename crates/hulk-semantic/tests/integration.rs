@@ -33,6 +33,10 @@ fn binop(op: BinOp, l: Expr, r: Expr) -> Expr {
     e(ExprKind::BinOp(op, Box::new(l), Box::new(r)))
 }
 
+fn b(v: bool) -> Expr {
+    e(ExprKind::Bool(v))
+}
+
 fn prog(entry: Expr) -> Program {
     Program {
         types: vec![],
@@ -429,4 +433,91 @@ fn errors_do_not_cascade() {
     let errs = analyze(&p).unwrap_err();
     assert_eq!(errs.len(), 1, "expected single error, got: {errs:?}");
     assert!(matches!(errs[0], SemError::UndefinedVariable { .. }));
+}
+
+#[test]
+fn is_requires_defined_type() {
+    let p = prog(e(ExprKind::Is(Box::new(n(1.0)), "Nope".into())));
+    assert!(matches!(first_err(&p), SemError::UndefinedType { .. }));
+}
+
+#[test]
+fn concat_rejects_non_string_number_operands() {
+    let p = prog(call("print", vec![binop(BinOp::Concat, b(true), s("x"))]));
+    assert!(matches!(first_err(&p), SemError::Mismatch { .. }));
+}
+
+#[test]
+fn explicit_inherits_args_are_typechecked() {
+    // type P(x: Number) { }
+    // type C inherits P("hi") { }    -- mismatch
+    let p_type = TypeDecl {
+        name: "P".into(),
+        type_params: vec![Param {
+            name: "x".into(),
+            ty: Some("Number".into()),
+            span: Span::default(),
+        }],
+        parent: None,
+        attributes: vec![],
+        methods: vec![],
+        span: Span::default(),
+    };
+    let c_type = TypeDecl {
+        name: "C".into(),
+        type_params: vec![],
+        parent: Some(ParentSpec {
+            name: "P".into(),
+            args: Some(vec![s("hi")]),
+            span: Span::default(),
+        }),
+        attributes: vec![],
+        methods: vec![],
+        span: Span::default(),
+    };
+    let p = Program {
+        types: vec![p_type, c_type],
+        functions: vec![],
+        entry: n(0.0),
+    };
+    let errs = analyze(&p).unwrap_err();
+    assert!(errs.iter().any(|x| matches!(x, SemError::Mismatch { .. })));
+}
+
+#[test]
+fn reserved_type_names_are_rejected() {
+    let t = TypeDecl {
+        name: "Number".into(),
+        type_params: vec![],
+        parent: None,
+        attributes: vec![],
+        methods: vec![],
+        span: Span::default(),
+    };
+    let p = Program {
+        types: vec![t],
+        functions: vec![],
+        entry: n(0.0),
+    };
+    let errs = analyze(&p).unwrap_err();
+    assert!(
+        errs.iter()
+            .any(|x| matches!(x, SemError::ReservedTypeName { .. }))
+    );
+}
+
+#[test]
+fn reserved_let_binder_names_are_rejected() {
+    // let self = 1 in 2
+    let p = prog(e(ExprKind::Let(
+        "self".into(),
+        None,
+        Box::new(n(1.0)),
+        Box::new(n(2.0)),
+    )));
+    let errs = analyze(&p).unwrap_err();
+    assert!(
+        errs.iter()
+            .any(|x| matches!(x, SemError::ReservedName { .. }))
+    );
 }
