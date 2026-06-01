@@ -19,7 +19,7 @@ pub type ParseError<'input> = lalrpop_util::ParseError<usize, Token, LexError>;
 /// Helper enum used internally by the grammar to distinguish type members
 /// during parsing.
 #[derive(Debug)]
-pub enum TypeMemberKind {
+pub(crate) enum TypeMemberKind {
     /// An attribute declaration.
     Attr(AttrDecl),
     /// A method declaration.

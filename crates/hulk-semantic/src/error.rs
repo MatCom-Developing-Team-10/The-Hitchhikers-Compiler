@@ -6,6 +6,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SemError {
+    #[error("reserved name `{name}`")]
+    ReservedName { name: String, span: Span },
+
+    #[error("reserved type name `{name}`")]
+    ReservedTypeName { name: String, span: Span },
+
     #[error("undefined variable `{name}`")]
     UndefinedVariable { name: String, span: Span },
 
@@ -74,7 +80,9 @@ pub enum SemError {
 impl SemError {
     pub fn span(&self) -> Span {
         match self {
-            SemError::UndefinedVariable { span, .. }
+            SemError::ReservedName { span, .. }
+            | SemError::ReservedTypeName { span, .. }
+            | SemError::UndefinedVariable { span, .. }
             | SemError::UndefinedFunction { span, .. }
             | SemError::UndefinedType { span, .. }
             | SemError::Mismatch { span, .. }

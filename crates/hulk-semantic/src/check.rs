@@ -45,6 +45,13 @@ impl Checker {
 
     pub fn collect(&mut self, prog: &Program) {
         for td in &prog.types {
+            if matches!(td.name.as_str(), "Number" | "String" | "Boolean" | "Object") {
+                self.errors.push(SemError::ReservedTypeName {
+                    name: td.name.clone(),
+                    span: td.span,
+                });
+                continue;
+            }
             if self.ctx.types.contains_key(&td.name) {
                 self.errors.push(SemError::DuplicateType {
                     name: td.name.clone(),
@@ -115,6 +122,13 @@ impl Checker {
         }
 
         for f in &prog.functions {
+            if matches!(f.name.as_str(), "self" | "base") {
+                self.errors.push(SemError::ReservedName {
+                    name: f.name.clone(),
+                    span: f.span,
+                });
+                continue;
+            }
             if self.ctx.funcs.contains_key(&f.name) {
                 self.errors.push(SemError::DuplicateFunction {
                     name: f.name.clone(),
@@ -152,6 +166,14 @@ impl Checker {
 
     pub fn sign(&mut self, prog: &Program) {
         for f in &prog.functions {
+            for p in &f.params {
+                if matches!(p.name.as_str(), "self" | "base") {
+                    self.errors.push(SemError::ReservedName {
+                        name: p.name.clone(),
+                        span: p.span,
+                    });
+                }
+            }
             let params = f
                 .params
                 .iter()
@@ -166,6 +188,14 @@ impl Checker {
                 .insert(f.name.clone(), FunctionSig { params, returns });
         }
         for td in &prog.types {
+            for p in &td.type_params {
+                if matches!(p.name.as_str(), "self" | "base") {
+                    self.errors.push(SemError::ReservedName {
+                        name: p.name.clone(),
+                        span: p.span,
+                    });
+                }
+            }
             let ctor_params: Vec<(String, Type)> = td
                 .type_params
                 .iter()
@@ -185,6 +215,14 @@ impl Checker {
             }
             let mut methods = HashMap::new();
             for m in &td.methods {
+                for p in &m.params {
+                    if matches!(p.name.as_str(), "self" | "base") {
+                        self.errors.push(SemError::ReservedName {
+                            name: p.name.clone(),
+                            span: p.span,
+                        });
+                    }
+                }
                 let params = m
                     .params
                     .iter()
@@ -324,6 +362,30 @@ impl Checker {
         for td in &prog.types {
             let info = self.ctx.types.get(&td.name).cloned();
             if let Some(info) = info {
+                // Validate explicit parent constructor arguments in `inherits Parent(a, b, ...)`.
+                // These expressions can reference this type's constructor parameters, but not `self`.
+                if let Some(parent_spec) = td.parent.as_ref() {
+                    if let Some(args) = parent_spec.args.as_deref() {
+                        // If `collect` already repaired an invalid parent to Object, skip to avoid cascades.
+                        if info.parent != "Object" {
+                            let expected = self.effective_ctor_params(&info.parent);
+                            let mut env = Env::new();
+                            for (pname, pty) in &info.ctor_params {
+                                env.define(
+                                    pname,
+                                    Binding {
+                                        ty: pty.clone(),
+                                        span: td.span,
+                                    },
+                                );
+                            }
+                            let arg_tys: Vec<Type> =
+                                args.iter().map(|a| self.check_expr(&mut env, a)).collect();
+                            self.check_args(&expected, &arg_tys, args, parent_spec.span);
+                        }
+                    }
+                }
+
                 // Attribute initializers see only type parameters (A.7.2: "no self").
                 for a in &td.attributes {
                     let mut env = Env::new();
@@ -504,6 +566,12 @@ impl Checker {
             }
 
             ExprKind::Let(name, annot, value, body) => {
+                if matches!(name.as_str(), "self" | "base") {
+                    self.errors.push(SemError::ReservedName {
+                        name: name.clone(),
+                        span: e.span,
+                    });
+                }
                 let vt = self.check_expr(env, value);
                 let bound = match annot {
                     Some(t) => match self.ctx.resolve_name(t) {
@@ -522,13 +590,15 @@ impl Checker {
                     None => vt,
                 };
                 env.enter();
-                env.define(
-                    name,
-                    Binding {
-                        ty: bound,
-                        span: e.span,
-                    },
-                );
+                if !matches!(name.as_str(), "self" | "base") {
+                    env.define(
+                        name,
+                        Binding {
+                            ty: bound,
+                            span: e.span,
+                        },
+                    );
+                }
                 let bt = self.check_expr(env, body);
                 env.leave();
                 bt
@@ -646,6 +716,12 @@ impl Checker {
 
             ExprKind::Is(expr, _ty) => {
                 let _ = self.check_expr(env, expr);
+                if self.ctx.resolve_name(_ty).is_none() {
+                    self.errors.push(SemError::UndefinedType {
+                        name: _ty.clone(),
+                        span: e.span,
+                    });
+                }
                 Type::Boolean
             }
 
@@ -703,7 +779,9 @@ impl Checker {
             }
             Concat | ConcatWs => {
                 // A.2.2: `@` concatenates strings or string-representations of numbers.
-                // We accept any operand and produce String.
+                // Enforce `String`/`Number` operands (plus `Error` poison) and produce `String`.
+                self.require_concat_operand(lt, ls);
+                self.require_concat_operand(rt, rs);
                 Type::String
             }
             Lt | Le | Gt | Ge => {
@@ -718,6 +796,20 @@ impl Checker {
                 Type::Boolean
             }
         }
+    }
+
+    fn require_concat_operand(&mut self, found: &Type, span: Span) {
+        if matches!(found, Type::Error) {
+            return;
+        }
+        if matches!(found, Type::String | Type::Number) {
+            return;
+        }
+        self.errors.push(SemError::Mismatch {
+            expected: "String or Number".into(),
+            found: found.name().into(),
+            span,
+        });
     }
 
     fn check_args(&mut self, params: &[Type], arg_tys: &[Type], args: &[Expr], call_span: Span) {

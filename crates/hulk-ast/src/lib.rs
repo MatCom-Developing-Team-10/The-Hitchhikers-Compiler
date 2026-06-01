@@ -33,8 +33,8 @@ impl Span {
     /// Create a new span from byte offsets.
     pub fn new(lo: usize, hi: usize) -> Self {
         Self {
-            lo: lo as u32,
-            hi: hi as u32,
+            lo: u32::try_from(lo).expect("invariant: span lo fits in u32"),
+            hi: u32::try_from(hi).expect("invariant: span hi fits in u32"),
         }
     }
 
