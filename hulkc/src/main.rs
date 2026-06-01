@@ -39,26 +39,29 @@ fn cmd_run(file: &str) -> Result<()> {
     let source = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read source file: {file}"))?;
 
-    let ast = hulk_parser::parse(&source)
-        .map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
+    let ast =
+        hulk_parser::parse(&source).map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
 
     hulk_semantic::analyze(&ast).map_err(|errs| {
-        let msg = errs.iter().map(|e| format!("  {e}")).collect::<Vec<_>>().join("\n");
+        let msg = errs
+            .iter()
+            .map(|e| format!("  {e}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         anyhow::anyhow!("semantic errors:\n{msg}")
     })?;
 
     let ir = hulk_ir::lower_program(&ast);
 
-    hulk_vm::Vm::run_program(ir)
-        .map_err(|e| anyhow::anyhow!("runtime error: {e}"))
+    hulk_vm::Vm::run_program(ir).map_err(|e| anyhow::anyhow!("runtime error: {e}"))
 }
 
 fn cmd_parse(file: &str) -> Result<()> {
     let source = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read source file: {file}"))?;
 
-    let ast = hulk_parser::parse(&source)
-        .map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
+    let ast =
+        hulk_parser::parse(&source).map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
 
     println!("{ast:#?}");
     Ok(())

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use hulk_ir::{IrFunc, IrProgram, Instr, Value};
+use hulk_ir::{Instr, IrFunc, IrProgram, Value};
 use thiserror::Error;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -26,7 +26,10 @@ pub enum VmError {
     UndefinedFunction(String),
     /// An instruction received a value of the wrong type.
     #[error("type mismatch: expected {expected}, got {got}")]
-    TypeMismatch { expected: &'static str, got: &'static str },
+    TypeMismatch {
+        expected: &'static str,
+        got: &'static str,
+    },
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
@@ -41,7 +44,11 @@ pub struct Vm {
 impl Vm {
     /// Create a VM with no registered functions.
     pub fn new() -> Self {
-        Self { stack: Vec::new(), scopes: Vec::new(), functions: HashMap::new() }
+        Self {
+            stack: Vec::new(),
+            scopes: Vec::new(),
+            functions: HashMap::new(),
+        }
     }
 
     /// Convenience: load an [`IrProgram`] and execute its entry point.
@@ -70,7 +77,11 @@ impl Vm {
             .iter()
             .enumerate()
             .filter_map(|(i, instr)| {
-                if let Instr::Label(name) = instr { Some((name.clone(), i)) } else { None }
+                if let Instr::Label(name) = instr {
+                    Some((name.clone(), i))
+                } else {
+                    None
+                }
             })
             .collect()
     }
@@ -90,41 +101,91 @@ impl Vm {
                 Instr::PushNil => self.stack.push(Value::Nil),
 
                 // --- stack ---
-                Instr::Pop => { self.pop()?; }
+                Instr::Pop => {
+                    self.pop()?;
+                }
                 Instr::Dup => {
                     let v = self.peek()?;
                     self.stack.push(v);
                 }
 
                 // --- arithmetic ---
-                Instr::Add => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Num(a + b)); }
-                Instr::Sub => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Num(a - b)); }
-                Instr::Mul => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Num(a * b)); }
+                Instr::Add => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Num(a + b));
+                }
+                Instr::Sub => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Num(a - b));
+                }
+                Instr::Mul => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Num(a * b));
+                }
                 Instr::Div => {
                     let (a, b) = self.pop2_num()?;
-                    if b == 0.0 { return Err(VmError::DivisionByZero); }
+                    if b == 0.0 {
+                        return Err(VmError::DivisionByZero);
+                    }
                     self.stack.push(Value::Num(a / b));
                 }
-                Instr::Pow => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Num(a.powf(b))); }
+                Instr::Pow => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Num(a.powf(b)));
+                }
                 Instr::Mod => {
                     let (a, b) = self.pop2_num()?;
-                    if b == 0.0 { return Err(VmError::DivisionByZero); }
+                    if b == 0.0 {
+                        return Err(VmError::DivisionByZero);
+                    }
                     self.stack.push(Value::Num(a % b));
                 }
-                Instr::Neg => { let a = self.pop_num()?; self.stack.push(Value::Num(-a)); }
+                Instr::Neg => {
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Num(-a));
+                }
 
                 // --- boolean ---
-                Instr::And => { let (a, b) = self.pop2_bool()?; self.stack.push(Value::Bool(a && b)); }
-                Instr::Or  => { let (a, b) = self.pop2_bool()?; self.stack.push(Value::Bool(a || b)); }
-                Instr::Not => { let a = self.pop_bool()?; self.stack.push(Value::Bool(!a)); }
+                Instr::And => {
+                    let (a, b) = self.pop2_bool()?;
+                    self.stack.push(Value::Bool(a && b));
+                }
+                Instr::Or => {
+                    let (a, b) = self.pop2_bool()?;
+                    self.stack.push(Value::Bool(a || b));
+                }
+                Instr::Not => {
+                    let a = self.pop_bool()?;
+                    self.stack.push(Value::Bool(!a));
+                }
 
                 // --- comparison ---
-                Instr::Eq => { let b = self.pop()?; let a = self.pop()?; self.stack.push(Value::Bool(a == b)); }
-                Instr::Ne => { let b = self.pop()?; let a = self.pop()?; self.stack.push(Value::Bool(a != b)); }
-                Instr::Lt => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Bool(a < b)); }
-                Instr::Le => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Bool(a <= b)); }
-                Instr::Gt => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Bool(a > b)); }
-                Instr::Ge => { let (a, b) = self.pop2_num()?; self.stack.push(Value::Bool(a >= b)); }
+                Instr::Eq => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(Value::Bool(a == b));
+                }
+                Instr::Ne => {
+                    let b = self.pop()?;
+                    let a = self.pop()?;
+                    self.stack.push(Value::Bool(a != b));
+                }
+                Instr::Lt => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Bool(a < b));
+                }
+                Instr::Le => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Bool(a <= b));
+                }
+                Instr::Gt => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Bool(a > b));
+                }
+                Instr::Ge => {
+                    let (a, b) = self.pop2_num()?;
+                    self.stack.push(Value::Bool(a >= b));
+                }
 
                 // --- strings ---
                 Instr::Concat => {
@@ -160,19 +221,23 @@ impl Vm {
                         self.scopes.push(s);
                     }
                 }
-                Instr::EndScope => { self.scopes.pop(); }
+                Instr::EndScope => {
+                    self.scopes.pop();
+                }
 
                 // --- control flow ---
                 Instr::Label(_) => {} // resolved at startup
                 Instr::Jump(label) => {
-                    ip = *labels.get(label.as_str())
+                    ip = *labels
+                        .get(label.as_str())
                         .unwrap_or_else(|| panic!("jump to undefined label: {label}"));
                     continue;
                 }
                 Instr::JumpIfFalse(label) => {
                     let cond = self.pop_bool()?;
                     if !cond {
-                        ip = *labels.get(label.as_str())
+                        ip = *labels
+                            .get(label.as_str())
                             .unwrap_or_else(|| panic!("jump to undefined label: {label}"));
                         continue;
                     }
@@ -193,13 +258,25 @@ impl Vm {
                 }
 
                 // --- math builtins ---
-                Instr::Sqrt => { let a = self.pop_num()?; self.stack.push(Value::Num(a.sqrt())); }
-                Instr::Sin  => { let a = self.pop_num()?; self.stack.push(Value::Num(a.sin())); }
-                Instr::Cos  => { let a = self.pop_num()?; self.stack.push(Value::Num(a.cos())); }
-                Instr::Exp  => { let a = self.pop_num()?; self.stack.push(Value::Num(a.exp())); }
-                Instr::Log  => {
+                Instr::Sqrt => {
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Num(a.sqrt()));
+                }
+                Instr::Sin => {
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Num(a.sin()));
+                }
+                Instr::Cos => {
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Num(a.cos()));
+                }
+                Instr::Exp => {
+                    let a = self.pop_num()?;
+                    self.stack.push(Value::Num(a.exp()));
+                }
+                Instr::Log => {
                     let value = self.pop_num()?;
-                    let base  = self.pop_num()?;
+                    let base = self.pop_num()?;
                     self.stack.push(Value::Num(value.log(base)));
                 }
                 Instr::Rand => {
@@ -272,14 +349,20 @@ impl Vm {
     fn pop_num(&mut self) -> Result<f64, VmError> {
         match self.pop()? {
             Value::Num(n) => Ok(n),
-            v => Err(VmError::TypeMismatch { expected: "Number", got: v.type_name() }),
+            v => Err(VmError::TypeMismatch {
+                expected: "Number",
+                got: v.type_name(),
+            }),
         }
     }
 
     fn pop_bool(&mut self) -> Result<bool, VmError> {
         match self.pop()? {
             Value::Bool(b) => Ok(b),
-            v => Err(VmError::TypeMismatch { expected: "Boolean", got: v.type_name() }),
+            v => Err(VmError::TypeMismatch {
+                expected: "Boolean",
+                got: v.type_name(),
+            }),
         }
     }
 
@@ -336,19 +419,37 @@ mod tests {
 
     #[test]
     fn addition_leaves_correct_result() {
-        let stack = run(&[Instr::PushNum(1.0), Instr::PushNum(2.0), Instr::Add, Instr::Ret]).unwrap();
+        let stack = run(&[
+            Instr::PushNum(1.0),
+            Instr::PushNum(2.0),
+            Instr::Add,
+            Instr::Ret,
+        ])
+        .unwrap();
         assert_eq!(stack, vec![Value::Num(3.0)]);
     }
 
     #[test]
     fn subtraction_respects_operand_order() {
-        let stack = run(&[Instr::PushNum(10.0), Instr::PushNum(3.0), Instr::Sub, Instr::Ret]).unwrap();
+        let stack = run(&[
+            Instr::PushNum(10.0),
+            Instr::PushNum(3.0),
+            Instr::Sub,
+            Instr::Ret,
+        ])
+        .unwrap();
         assert_eq!(stack, vec![Value::Num(7.0)]);
     }
 
     #[test]
     fn pow_computes_correctly() {
-        let stack = run(&[Instr::PushNum(3.0), Instr::PushNum(3.0), Instr::Pow, Instr::Ret]).unwrap();
+        let stack = run(&[
+            Instr::PushNum(3.0),
+            Instr::PushNum(3.0),
+            Instr::Pow,
+            Instr::Ret,
+        ])
+        .unwrap();
         assert_eq!(stack, vec![Value::Num(27.0)]);
     }
 
@@ -366,13 +467,23 @@ mod tests {
 
     #[test]
     fn division_by_zero_returns_error() {
-        let result = run(&[Instr::PushNum(5.0), Instr::PushNum(0.0), Instr::Div, Instr::Ret]);
+        let result = run(&[
+            Instr::PushNum(5.0),
+            Instr::PushNum(0.0),
+            Instr::Div,
+            Instr::Ret,
+        ]);
         assert_eq!(result, Err(VmError::DivisionByZero));
     }
 
     #[test]
     fn modulo_by_zero_returns_error() {
-        let result = run(&[Instr::PushNum(5.0), Instr::PushNum(0.0), Instr::Mod, Instr::Ret]);
+        let result = run(&[
+            Instr::PushNum(5.0),
+            Instr::PushNum(0.0),
+            Instr::Mod,
+            Instr::Ret,
+        ]);
         assert_eq!(result, Err(VmError::DivisionByZero));
     }
 
@@ -513,10 +624,20 @@ mod tests {
             Instr::Label("end_0".to_string()),
             Instr::Ret,
         ];
-        let entry = vec![Instr::PushNum(2.0), Instr::Call("fib".to_string(), 1), Instr::Ret];
-        let funcs = [("fib".to_string(), IrFunc { params: vec!["n".to_string()], body: fib_body })]
-            .into_iter()
-            .collect();
+        let entry = vec![
+            Instr::PushNum(2.0),
+            Instr::Call("fib".to_string(), 1),
+            Instr::Ret,
+        ];
+        let funcs = [(
+            "fib".to_string(),
+            IrFunc {
+                params: vec!["n".to_string()],
+                body: fib_body,
+            },
+        )]
+        .into_iter()
+        .collect();
         let ir = IrProgram { funcs, entry };
         let mut vm = Vm::new();
         vm.functions = ir.funcs;

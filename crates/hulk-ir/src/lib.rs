@@ -439,7 +439,10 @@ mod tests {
     use hulk_ast::{Expr, ExprKind, Span};
 
     fn num(n: f64) -> Expr {
-        Expr { span: Span::default(), kind: ExprKind::Number(n) }
+        Expr {
+            span: Span::default(),
+            kind: ExprKind::Number(n),
+        }
     }
 
     fn binop(op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
@@ -457,7 +460,11 @@ mod tests {
     }
 
     fn mk_program(entry: Expr) -> Program {
-        Program { types: vec![], functions: vec![], entry }
+        Program {
+            types: vec![],
+            functions: vec![],
+            entry,
+        }
     }
 
     #[test]
@@ -471,14 +478,20 @@ mod tests {
     fn lower_addition_emits_operands_then_add() {
         let mut out = Vec::new();
         lower_expr(&binop(BinOp::Add, num(1.0), num(2.0)), &mut out);
-        assert_eq!(out, vec![Instr::PushNum(1.0), Instr::PushNum(2.0), Instr::Add]);
+        assert_eq!(
+            out,
+            vec![Instr::PushNum(1.0), Instr::PushNum(2.0), Instr::Add]
+        );
     }
 
     #[test]
     fn lower_subtraction_preserves_operand_order() {
         let mut out = Vec::new();
         lower_expr(&binop(BinOp::Sub, num(10.0), num(3.0)), &mut out);
-        assert_eq!(out, vec![Instr::PushNum(10.0), Instr::PushNum(3.0), Instr::Sub]);
+        assert_eq!(
+            out,
+            vec![Instr::PushNum(10.0), Instr::PushNum(3.0), Instr::Sub]
+        );
     }
 
     #[test]
@@ -507,8 +520,11 @@ mod tests {
 
     #[test]
     fn lower_nested_print_1_plus_2_pow_3() {
-        let expr =
-            call_print(binop(BinOp::Pow, binop(BinOp::Add, num(1.0), num(2.0)), num(3.0)));
+        let expr = call_print(binop(
+            BinOp::Pow,
+            binop(BinOp::Add, num(1.0), num(2.0)),
+            num(3.0),
+        ));
         let ir = lower_program(&mk_program(expr));
         assert_eq!(
             ir.entry,
@@ -533,7 +549,10 @@ mod tests {
                 "x".to_string(),
                 None,
                 Box::new(num(5.0)),
-                Box::new(Expr { span: Span::default(), kind: ExprKind::Ident("x".to_string()) }),
+                Box::new(Expr {
+                    span: Span::default(),
+                    kind: ExprKind::Ident("x".to_string()),
+                }),
             ),
         };
         let mut out = Vec::new();
@@ -561,7 +580,11 @@ mod tests {
         lower_expr(&expr, &mut out);
         assert_eq!(
             out,
-            vec![Instr::PushNum(42.0), Instr::Dup, Instr::StoreVar("a".to_string())]
+            vec![
+                Instr::PushNum(42.0),
+                Instr::Dup,
+                Instr::StoreVar("a".to_string())
+            ]
         );
     }
 
@@ -589,7 +612,10 @@ mod tests {
     #[test]
     fn lower_builtin_constants_inline() {
         // PI
-        let pi = Expr { span: Span::default(), kind: ExprKind::Ident("PI".to_string()) };
+        let pi = Expr {
+            span: Span::default(),
+            kind: ExprKind::Ident("PI".to_string()),
+        };
         let mut out = Vec::new();
         lower_expr(&pi, &mut out);
         assert_eq!(out, vec![Instr::PushNum(std::f64::consts::PI)]);
