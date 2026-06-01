@@ -28,13 +28,36 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Run { file } => {
-            println!("[skeleton] would run: {file}");
-        }
-        Command::Parse { file } => {
-            println!("[skeleton] would parse: {file}");
-        }
+        Command::Run { file } => cmd_run(&file),
+        Command::Parse { file } => cmd_parse(&file),
     }
+}
 
+fn cmd_run(file: &str) -> Result<()> {
+    let source = std::fs::read_to_string(file)
+        .map_err(|e| anyhow::anyhow!("cannot read '{file}': {e}"))?;
+
+    let ast = hulk_parser::parse(&source)
+        .map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+
+    hulk_semantic::analyze(&ast).map_err(|errs| {
+        let msg = errs.iter().map(|e| format!("  {e}")).collect::<Vec<_>>().join("\n");
+        anyhow::anyhow!("semantic errors:\n{msg}")
+    })?;
+
+    let ir = hulk_ir::lower_program(&ast);
+
+    hulk_vm::Vm::run_program(ir)
+        .map_err(|e| anyhow::anyhow!("runtime error: {e}"))
+}
+
+fn cmd_parse(file: &str) -> Result<()> {
+    let source = std::fs::read_to_string(file)
+        .map_err(|e| anyhow::anyhow!("cannot read '{file}': {e}"))?;
+
+    let ast = hulk_parser::parse(&source)
+        .map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+
+    println!("{ast:#?}");
     Ok(())
 }
