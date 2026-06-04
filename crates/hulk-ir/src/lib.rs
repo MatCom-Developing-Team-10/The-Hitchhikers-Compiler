@@ -355,10 +355,46 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             lower_call(name, args, out, ctx);
         }
 
-        ExprKind::For(_, _, _) => {
-            panic!(
-                "for loops require the Iterable protocol and are not yet supported in this backend"
-            );
+        // for (x in iter_expr) body
+        //
+        // Compiled as: create iterator, while hasNext(): bind x = current(); body; next()
+        ExprKind::For(var, iter_expr, body) => {
+            let id = ctx.next();
+            let start = format!("for_start_{id}");
+            let end = format!("for_end_{id}");
+            let iter_var = format!("__for_iter_{id}");
+
+            out.push(Instr::BeginScope);
+            lower_inner(iter_expr, out, ctx); // push iterator object
+            out.push(Instr::BindVar(iter_var.clone())); // bind to hidden var
+
+            out.push(Instr::PushNil); // default result if loop never executes
+
+            out.push(Instr::Label(start.clone()));
+
+            // Condition: iter.hasNext()
+            out.push(Instr::LoadVar(iter_var.clone()));
+            out.push(Instr::CallMethod("hasNext".to_string(), 0));
+            out.push(Instr::JumpIfFalse(end.clone()));
+
+            out.push(Instr::Pop); // discard previous iteration result
+
+            // Bind loop variable = iter.current(), run body.
+            out.push(Instr::BeginScope);
+            out.push(Instr::LoadVar(iter_var.clone()));
+            out.push(Instr::CallMethod("current".to_string(), 0));
+            out.push(Instr::BindVar(var.clone()));
+            lower_inner(body, out, ctx);
+            out.push(Instr::EndScope);
+
+            // Advance: iter.next()  (return value discarded)
+            out.push(Instr::LoadVar(iter_var.clone()));
+            out.push(Instr::CallMethod("next".to_string(), 0));
+            out.push(Instr::Pop);
+
+            out.push(Instr::Jump(start));
+            out.push(Instr::Label(end));
+            out.push(Instr::EndScope);
         }
 
         // ── OOP ──────────────────────────────────────────────────────────────
@@ -529,6 +565,12 @@ fn lower_call(name: &str, args: &[Expr], out: &mut Vec<Instr>, ctx: &mut Ctx) {
             assert_eq!(args.len(), 0, "rand expects 0 arguments");
             out.push(Instr::Rand);
         }
+        "range" => {
+            assert_eq!(args.len(), 2, "range expects 2 arguments (lo, hi)");
+            lower_inner(&args[0], out, ctx); // lo
+            lower_inner(&args[1], out, ctx); // hi
+            out.push(Instr::Call("__builtin_range".to_string(), 2));
+        }
         other => {
             for arg in args {
                 lower_inner(arg, out, ctx);
@@ -689,6 +731,99 @@ fn lower_method(type_name: &str, parent_name: &str, decl: &hulk_ast::MethodDecl)
     IrFunc { params, body }
 }
 
+/// Register the built-in `Range` type and its synthetic IR functions.
+///
+/// `range(lo, hi)` is compiled to `Call("__builtin_range", 2)`.  The returned
+/// object supports the Iterable protocol (`hasNext`, `current`, `next`) so
+/// that `for (x in range(lo, hi)) body` can dispatch through `CallMethod`.
+fn register_range_builtins(funcs: &mut HashMap<String, IrFunc>, types: &mut HashMap<String, IrTypeInfo>) {
+    // __builtin_range(lo, hi) → Range object
+    funcs.insert(
+        "__builtin_range".to_string(),
+        IrFunc {
+            params: vec!["__lo".to_string(), "__hi".to_string()],
+            body: vec![
+                Instr::NewObject("Range".to_string()),
+                Instr::BeginScope,
+                Instr::BindVar("__self".to_string()),
+                // current = lo
+                Instr::LoadVar("__lo".to_string()),
+                Instr::LoadVar("__self".to_string()),
+                Instr::SetField("current".to_string()),
+                Instr::Pop,
+                // hi = hi
+                Instr::LoadVar("__hi".to_string()),
+                Instr::LoadVar("__self".to_string()),
+                Instr::SetField("hi".to_string()),
+                Instr::Pop,
+                Instr::LoadVar("__self".to_string()),
+                Instr::EndScope,
+                Instr::Ret,
+            ],
+        },
+    );
+
+    // hasNext(): self.current < self.hi
+    funcs.insert(
+        "__method_Range_hasNext".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("current".to_string()),
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("hi".to_string()),
+                Instr::Lt,
+                Instr::Ret,
+            ],
+        },
+    );
+
+    // current(): self.current
+    funcs.insert(
+        "__method_Range_current".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("current".to_string()),
+                Instr::Ret,
+            ],
+        },
+    );
+
+    // next(): self.current := self.current + 1; return new value
+    funcs.insert(
+        "__method_Range_next".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("current".to_string()),
+                Instr::PushNum(1.0),
+                Instr::Add,
+                Instr::LoadVar("self".to_string()), // obj on top for SetField
+                Instr::SetField("current".to_string()),
+                Instr::Ret,
+            ],
+        },
+    );
+
+    types.insert(
+        "Range".to_string(),
+        IrTypeInfo {
+            parent: "Object".to_string(),
+            methods: [
+                ("hasNext".to_string(), "__method_Range_hasNext".to_string()),
+                ("current".to_string(), "__method_Range_current".to_string()),
+                ("next".to_string(), "__method_Range_next".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    );
+}
+
 /// Lower a complete [`Program`] to an [`IrProgram`].
 pub fn lower_program(program: &Program) -> IrProgram {
     let mut funcs: HashMap<String, IrFunc> = program
@@ -727,6 +862,8 @@ pub fn lower_program(program: &Program) -> IrProgram {
             },
         );
     }
+
+    register_range_builtins(&mut funcs, &mut types);
 
     let mut entry = Vec::new();
     let mut ctx = Ctx::new();
