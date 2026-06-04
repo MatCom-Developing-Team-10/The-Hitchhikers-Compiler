@@ -1,0 +1,10 @@
+type Animal(name: String) {
+    name = name;
+    speak() => "...";
+}
+
+type Dog(name: String) inherits Animal(name) {
+    speak() => "Woof! I am" @@ self.name;
+}
+
+let d = new Dog("Rex") in print(d.speak());

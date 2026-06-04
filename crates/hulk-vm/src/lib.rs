@@ -1,10 +1,10 @@
 //! Stack-based bytecode interpreter for HULK.
 //!
-//! See `vm-v2.spec.md` for the full specification.
+//! See `vm-v2.spec.md` and `vm-v3.spec.md` for the full specification.
 
 use std::collections::HashMap;
 
-use hulk_ir::{Instr, IrFunc, IrProgram, Value};
+use hulk_ir::{Instr, IrFunc, IrProgram, IrTypeInfo, Object, ObjectRef, Value};
 use thiserror::Error;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -30,6 +30,18 @@ pub enum VmError {
         expected: &'static str,
         got: &'static str,
     },
+    /// GetField/SetField/CallMethod called on a non-object value.
+    #[error("null object reference")]
+    NullReference,
+    /// GetField or SetField on a field that does not exist.
+    #[error("undefined field: {0}")]
+    UndefinedField(String),
+    /// CallMethod could not find the method in the type hierarchy.
+    #[error("undefined method: {0}")]
+    UndefinedMethod(String),
+    /// AsType assertion failed.
+    #[error("cannot cast {from} to {to}")]
+    InvalidCast { from: String, to: String },
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
@@ -39,15 +51,18 @@ pub struct Vm {
     stack: Vec<Value>,
     scopes: Vec<HashMap<String, Value>>,
     functions: HashMap<String, IrFunc>,
+    /// Type metadata for virtual dispatch and `is`/`as` conformance checks.
+    types: HashMap<String, IrTypeInfo>,
 }
 
 impl Vm {
-    /// Create a VM with no registered functions.
+    /// Create a VM with no registered functions or types.
     pub fn new() -> Self {
         Self {
             stack: Vec::new(),
             scopes: Vec::new(),
             functions: HashMap::new(),
+            types: HashMap::new(),
         }
     }
 
@@ -57,6 +72,7 @@ impl Vm {
             stack: Vec::new(),
             scopes: Vec::new(),
             functions: ir.funcs,
+            types: ir.types,
         };
         vm.run(&ir.entry)
     }
@@ -254,7 +270,7 @@ impl Vm {
                 Instr::Print => {
                     let val = self.pop()?;
                     println!("{val}");
-                    self.stack.push(val); // print returns its argument
+                    self.stack.push(val);
                 }
 
                 // --- math builtins ---
@@ -290,44 +306,206 @@ impl Vm {
                         / 0x000F_FFFF_FFFF_FFFFu64 as f64;
                     self.stack.push(Value::Num(r));
                 }
+
+                // --- OOP ---
+
+                // Create an empty object and push it.
+                Instr::NewObject(type_name) => {
+                    use std::cell::RefCell;
+                    use std::rc::Rc;
+                    let obj = Rc::new(RefCell::new(Object {
+                        type_name: type_name.clone(),
+                        fields: HashMap::new(),
+                    }));
+                    self.stack.push(Value::Object(obj));
+                }
+
+                // Pop object, push field value.
+                Instr::GetField(name) => {
+                    let obj_ref = self.pop_object()?;
+                    let val = obj_ref
+                        .borrow()
+                        .fields
+                        .get(name.as_str())
+                        .cloned()
+                        .ok_or_else(|| VmError::UndefinedField(name.clone()))?;
+                    self.stack.push(val);
+                }
+
+                // Pop object (top), pop value; set field; push value.
+                Instr::SetField(name) => {
+                    let obj_ref = self.pop_object()?;
+                    let val = self.pop()?;
+                    obj_ref
+                        .borrow_mut()
+                        .fields
+                        .insert(name.clone(), val.clone());
+                    self.stack.push(val);
+                }
+
+                // Virtual method dispatch.
+                Instr::CallMethod(method_name, argc) => {
+                    let method_name = method_name.clone();
+                    let argc = *argc;
+
+                    // Pop args (reverse to get natural order).
+                    let mut args: Vec<Value> = (0..argc)
+                        .map(|_| self.pop())
+                        .collect::<Result<Vec<_>, _>>()?;
+                    args.reverse();
+
+                    // Pop self.
+                    let self_val = self.pop()?;
+                    let obj_ref = match &self_val {
+                        Value::Object(r) => r.clone(),
+                        Value::Nil => return Err(VmError::NullReference),
+                        v => {
+                            return Err(VmError::TypeMismatch {
+                                expected: "Object",
+                                got: v.type_name(),
+                            })
+                        }
+                    };
+
+                    let type_name = obj_ref.borrow().type_name.clone();
+                    let func_name = self.resolve_method(&type_name, &method_name)?;
+
+                    // Prepend self to the argument list.
+                    let mut all_args = vec![Value::Object(obj_ref)];
+                    all_args.extend(args);
+                    self.call_func_with_args(&func_name, all_args)?;
+                }
+
+                // Runtime type test: push bool.
+                Instr::IsType(target) => {
+                    let val = self.pop()?;
+                    let result = match &val {
+                        Value::Object(r) => {
+                            let runtime_type = r.borrow().type_name.clone();
+                            self.conforms(&runtime_type, target)
+                        }
+                        _ => false,
+                    };
+                    self.stack.push(Value::Bool(result));
+                }
+
+                // Runtime type assertion.
+                Instr::AsType(target) => {
+                    let val = self.pop()?;
+                    match &val {
+                        Value::Object(r) => {
+                            let runtime_type = r.borrow().type_name.clone();
+                            if !self.conforms(&runtime_type, target) {
+                                return Err(VmError::InvalidCast {
+                                    from: runtime_type,
+                                    to: target.clone(),
+                                });
+                            }
+                            self.stack.push(val);
+                        }
+                        other => {
+                            return Err(VmError::InvalidCast {
+                                from: other.type_name().to_string(),
+                                to: target.clone(),
+                            });
+                        }
+                    }
+                }
             }
             ip += 1;
         }
         Ok(())
     }
 
+    // ── OOP helpers ───────────────────────────────────────────────────────────
+
+    /// Walk the type hierarchy to find the IR function that implements `method_name`
+    /// for `type_name`.
+    fn resolve_method(&self, type_name: &str, method_name: &str) -> Result<String, VmError> {
+        let mut cur = type_name.to_string();
+        loop {
+            if let Some(info) = self.types.get(&cur) {
+                if let Some(func_name) = info.methods.get(method_name) {
+                    return Ok(func_name.clone());
+                }
+                if info.parent == "Object" {
+                    return Err(VmError::UndefinedMethod(method_name.to_string()));
+                }
+                cur = info.parent.clone();
+            } else {
+                return Err(VmError::UndefinedMethod(method_name.to_string()));
+            }
+        }
+    }
+
+    /// Return `true` if `runtime_type` is the same as `target` or is a
+    /// (transitive) subtype of it.
+    fn conforms(&self, runtime_type: &str, target: &str) -> bool {
+        if runtime_type == target {
+            return true;
+        }
+        let mut cur = runtime_type.to_string();
+        loop {
+            match self.types.get(&cur) {
+                None => return false,
+                Some(info) => {
+                    if info.parent == target {
+                        return true;
+                    }
+                    if info.parent == "Object" {
+                        return false;
+                    }
+                    cur = info.parent.clone();
+                }
+            }
+        }
+    }
+
+    /// Pop the top of the stack and interpret it as an `ObjectRef`.
+    ///
+    /// Returns `NullReference` for `Nil` and `TypeMismatch` for other primitives.
+    fn pop_object(&mut self) -> Result<ObjectRef, VmError> {
+        match self.pop()? {
+            Value::Object(r) => Ok(r),
+            Value::Nil => Err(VmError::NullReference),
+            v => Err(VmError::TypeMismatch {
+                expected: "Object",
+                got: v.type_name(),
+            }),
+        }
+    }
+
+    // ── function call helpers ─────────────────────────────────────────────────
+
     fn call_func(&mut self, name: &str, argc: usize) -> Result<(), VmError> {
-        // Pop args; the last arg is on top, so reverse to get natural order.
         let mut args: Vec<Value> = (0..argc)
             .map(|_| self.pop())
             .collect::<Result<Vec<_>, _>>()?;
         args.reverse();
+        self.call_func_with_args(name, args)
+    }
 
+    fn call_func_with_args(&mut self, name: &str, args: Vec<Value>) -> Result<(), VmError> {
         let func = self
             .functions
             .get(name)
             .cloned()
             .ok_or_else(|| VmError::UndefinedFunction(name.to_string()))?;
 
-        // Isolate the function: save caller's stack and scopes.
         let saved_stack = std::mem::take(&mut self.stack);
         let saved_scopes = std::mem::take(&mut self.scopes);
 
-        // Bind parameters.
         let mut scope = HashMap::new();
         for (param, arg) in func.params.iter().zip(args) {
             scope.insert(param.clone(), arg);
         }
         self.scopes.push(scope);
 
-        // Execute.
         let labels = Self::resolve_labels(&func.body);
         let result = self.run_with_labels(&func.body, &labels);
 
-        // Collect return value (top of function's stack).
         let ret_val = self.stack.pop().unwrap_or(Value::Nil);
 
-        // Restore caller state.
         self.scopes = saved_scopes;
         self.stack = saved_stack;
 
@@ -366,7 +544,6 @@ impl Vm {
         }
     }
 
-    /// Pop `b` (top), then `a`; return `(a, b)`.
     fn pop2_num(&mut self) -> Result<(f64, f64), VmError> {
         let b = self.pop_num()?;
         let a = self.pop_num()?;
@@ -410,12 +587,24 @@ impl Default for Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hulk_ir::{IrFunc, IrProgram, IrTypeInfo};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     fn run(instrs: &[Instr]) -> Result<Vec<Value>, VmError> {
         let mut vm = Vm::new();
         vm.run(instrs)?;
         Ok(vm.stack.clone())
     }
+
+    fn make_object(type_name: &str) -> Value {
+        Value::Object(Rc::new(RefCell::new(Object {
+            type_name: type_name.to_string(),
+            fields: HashMap::new(),
+        })))
+    }
+
+    // ── pre-existing tests ────────────────────────────────────────────────────
 
     #[test]
     fn addition_leaves_correct_result() {
@@ -501,7 +690,6 @@ mod tests {
 
     #[test]
     fn let_binding_loads_correct_value() {
-        // let x = 7 in x
         let instrs = vec![
             Instr::BeginScope,
             Instr::PushNum(7.0),
@@ -516,17 +704,14 @@ mod tests {
 
     #[test]
     fn destructive_assign_updates_variable() {
-        // let x = 0 in { x := 99; x }
         let instrs = vec![
             Instr::BeginScope,
             Instr::PushNum(0.0),
             Instr::BindVar("x".to_string()),
-            // x := 99
             Instr::PushNum(99.0),
             Instr::Dup,
             Instr::StoreVar("x".to_string()),
-            Instr::Pop, // discard assign return value (statement)
-            // x
+            Instr::Pop,
             Instr::LoadVar("x".to_string()),
             Instr::EndScope,
             Instr::Ret,
@@ -537,7 +722,6 @@ mod tests {
 
     #[test]
     fn if_true_branch_taken() {
-        // if (true) 1 else 2
         let instrs = vec![
             Instr::PushBool(true),
             Instr::JumpIfFalse("else".to_string()),
@@ -554,7 +738,6 @@ mod tests {
 
     #[test]
     fn if_false_branch_taken() {
-        // if (false) 1 else 2
         let instrs = vec![
             Instr::PushBool(false),
             Instr::JumpIfFalse("else".to_string()),
@@ -571,13 +754,10 @@ mod tests {
 
     #[test]
     fn while_loop_counts_down() {
-        // let n = 3 in while (n > 0) n := n - 1  →  stack = Nil (0 is last assign)
-        // Manually built instruction sequence
         let instrs = vec![
             Instr::BeginScope,
             Instr::PushNum(3.0),
             Instr::BindVar("n".to_string()),
-            // while:
             Instr::PushNil,
             Instr::Label("ls".to_string()),
             Instr::LoadVar("n".to_string()),
@@ -596,14 +776,11 @@ mod tests {
             Instr::Ret,
         ];
         let stack = run(&instrs).unwrap();
-        // Last body value was `n := n-1` when n became 0 → assigned value 0
         assert_eq!(stack, vec![Value::Num(0.0)]);
     }
 
     #[test]
     fn function_call_fib_2_returns_1() {
-        use hulk_ir::{IrFunc, IrProgram};
-        // fib(n) = if n<=1 then n else fib(n-1)+fib(n-2)
         let fib_body = vec![
             Instr::LoadVar("n".to_string()),
             Instr::PushNum(1.0),
@@ -638,7 +815,11 @@ mod tests {
         )]
         .into_iter()
         .collect();
-        let ir = IrProgram { funcs, entry };
+        let ir = IrProgram {
+            funcs,
+            types: HashMap::new(),
+            entry,
+        };
         let mut vm = Vm::new();
         vm.functions = ir.funcs;
         vm.run(&ir.entry).unwrap();
@@ -661,5 +842,240 @@ mod tests {
     fn boolean_not_works() {
         let stack = run(&[Instr::PushBool(true), Instr::Not, Instr::Ret]).unwrap();
         assert_eq!(stack, vec![Value::Bool(false)]);
+    }
+
+    // ── OOP-specific tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn new_object_creates_empty_object() {
+        let stack = run(&[Instr::NewObject("Dog".to_string()), Instr::Ret]).unwrap();
+        assert_eq!(stack.len(), 1);
+        if let Value::Object(r) = &stack[0] {
+            assert_eq!(r.borrow().type_name, "Dog");
+            assert!(r.borrow().fields.is_empty());
+        } else {
+            panic!("expected Object");
+        }
+    }
+
+    #[test]
+    fn set_and_get_field_roundtrip() {
+        // SetField expects [..., val, obj(top)]; bind the object to a var so we
+        // can push it on top after the value.
+        let instrs = vec![
+            Instr::NewObject("Dog".to_string()), // [obj]
+            Instr::BeginScope,
+            Instr::BindVar("o".to_string()),     // []; obj in scope
+            Instr::PushStr("Rex".to_string()),   // ["Rex"]
+            Instr::LoadVar("o".to_string()),     // ["Rex", obj]  — obj on top
+            Instr::SetField("name".to_string()), // pop obj, pop "Rex", set; push "Rex"
+            Instr::Pop,                          // []
+            Instr::LoadVar("o".to_string()),     // [obj]
+            Instr::GetField("name".to_string()), // ["Rex"]
+            Instr::EndScope,
+            Instr::Ret,
+        ];
+        let stack = run(&instrs).unwrap();
+        assert_eq!(stack, vec![Value::Str("Rex".to_string())]);
+    }
+
+    #[test]
+    fn get_field_undefined_returns_error() {
+        let obj = make_object("Dog");
+        let mut vm = Vm::new();
+        vm.stack.push(obj);
+        let result = vm.run(&[Instr::GetField("missing".to_string()), Instr::Ret]);
+        assert!(matches!(result, Err(VmError::UndefinedField(_))));
+    }
+
+    #[test]
+    fn is_type_true_for_exact_type() {
+        let obj = make_object("Dog");
+        let mut vm = Vm::new();
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Animal".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.types.insert(
+            "Animal".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.stack.push(obj);
+        vm.run(&[Instr::IsType("Dog".to_string()), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack, vec![Value::Bool(true)]);
+    }
+
+    #[test]
+    fn is_type_true_for_ancestor() {
+        let obj = make_object("Dog");
+        let mut vm = Vm::new();
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Animal".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.types.insert(
+            "Animal".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.stack.push(obj);
+        vm.run(&[Instr::IsType("Animal".to_string()), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack, vec![Value::Bool(true)]);
+    }
+
+    #[test]
+    fn is_type_false_for_unrelated_type() {
+        let obj = make_object("Dog");
+        let mut vm = Vm::new();
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.stack.push(obj);
+        vm.run(&[Instr::IsType("Cat".to_string()), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack, vec![Value::Bool(false)]);
+    }
+
+    #[test]
+    fn is_type_false_for_primitive() {
+        let instrs = vec![
+            Instr::PushNum(42.0),
+            Instr::IsType("Animal".to_string()),
+            Instr::Ret,
+        ];
+        let stack = run(&instrs).unwrap();
+        assert_eq!(stack, vec![Value::Bool(false)]);
+    }
+
+    #[test]
+    fn as_type_succeeds_when_conforming() {
+        let obj = make_object("Dog");
+        let mut vm = Vm::new();
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Animal".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.types.insert(
+            "Animal".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.stack.push(obj.clone());
+        vm.run(&[Instr::AsType("Animal".to_string()), Instr::Ret])
+            .unwrap();
+        // Same object reference returned.
+        assert_eq!(vm.stack.len(), 1);
+        assert_eq!(vm.stack[0], obj);
+    }
+
+    #[test]
+    fn as_type_fails_with_invalid_cast() {
+        let obj = make_object("Dog");
+        let mut vm = Vm::new();
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.stack.push(obj);
+        let result = vm.run(&[Instr::AsType("Cat".to_string()), Instr::Ret]);
+        assert!(matches!(result, Err(VmError::InvalidCast { .. })));
+    }
+
+    #[test]
+    fn call_method_dispatches_to_correct_implementation() {
+        // type Dog { speak() => "Woof" }
+        let speak_body = vec![Instr::PushStr("Woof".to_string()), Instr::Ret];
+        let obj = make_object("Dog");
+
+        let mut vm = Vm::new();
+        vm.functions.insert(
+            "__method_Dog_speak".to_string(),
+            IrFunc {
+                params: vec!["self".to_string()],
+                body: speak_body,
+            },
+        );
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: [(
+                    "speak".to_string(),
+                    "__method_Dog_speak".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            },
+        );
+
+        vm.stack.push(obj); // self on top, argc=0
+        vm.run(&[Instr::CallMethod("speak".to_string(), 0), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack, vec![Value::Str("Woof".to_string())]);
+    }
+
+    #[test]
+    fn call_method_inherits_from_parent_when_not_overridden() {
+        // Animal has speak(); Dog inherits Animal without overriding speak.
+        let speak_body = vec![Instr::PushStr("...".to_string()), Instr::Ret];
+        let obj = make_object("Dog");
+
+        let mut vm = Vm::new();
+        vm.functions.insert(
+            "__method_Animal_speak".to_string(),
+            IrFunc {
+                params: vec!["self".to_string()],
+                body: speak_body,
+            },
+        );
+        vm.types.insert(
+            "Animal".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: [(
+                    "speak".to_string(),
+                    "__method_Animal_speak".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            },
+        );
+        vm.types.insert(
+            "Dog".to_string(),
+            IrTypeInfo {
+                parent: "Animal".to_string(),
+                methods: HashMap::new(), // no override
+            },
+        );
+
+        vm.stack.push(obj);
+        vm.run(&[Instr::CallMethod("speak".to_string(), 0), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack, vec![Value::Str("...".to_string())]);
     }
 }

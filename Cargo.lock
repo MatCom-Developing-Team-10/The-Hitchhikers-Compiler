@@ -315,6 +315,7 @@ dependencies = [
  "hulk-parser",
  "hulk-semantic",
  "hulk-vm",
+ "lalrpop-util",
 ]
 
 [[package]]
