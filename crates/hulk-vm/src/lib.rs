@@ -363,7 +363,7 @@ impl Vm {
                             return Err(VmError::TypeMismatch {
                                 expected: "Object",
                                 got: v.type_name(),
-                            })
+                            });
                         }
                     };
 
@@ -1024,12 +1024,9 @@ mod tests {
             "Dog".to_string(),
             IrTypeInfo {
                 parent: "Object".to_string(),
-                methods: [(
-                    "speak".to_string(),
-                    "__method_Dog_speak".to_string(),
-                )]
-                .into_iter()
-                .collect(),
+                methods: [("speak".to_string(), "__method_Dog_speak".to_string())]
+                    .into_iter()
+                    .collect(),
             },
         );
 
@@ -1057,12 +1054,9 @@ mod tests {
             "Animal".to_string(),
             IrTypeInfo {
                 parent: "Object".to_string(),
-                methods: [(
-                    "speak".to_string(),
-                    "__method_Animal_speak".to_string(),
-                )]
-                .into_iter()
-                .collect(),
+                methods: [("speak".to_string(), "__method_Animal_speak".to_string())]
+                    .into_iter()
+                    .collect(),
             },
         );
         vm.types.insert(

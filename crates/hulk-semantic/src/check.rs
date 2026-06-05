@@ -217,7 +217,13 @@ impl Checker {
                     let saved = self.errors.len();
                     let mut env = Env::new();
                     for (pname, pty) in &ctor_params {
-                        env.define(pname, Binding { ty: pty.clone(), span: a.span });
+                        env.define(
+                            pname,
+                            Binding {
+                                ty: pty.clone(),
+                                span: a.span,
+                            },
+                        );
                     }
                     let inferred = self.check_expr(&mut env, &a.init);
                     self.errors.truncate(saved);

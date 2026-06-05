@@ -599,21 +599,16 @@ fn lower_func(decl: &FunctionDecl) -> IrFunc {
 /// is absent (inherits Object implicitly) or whose parent is not in `all_types`.
 fn ancestry_chain<'a>(type_name: &str, all_types: &'a [TypeDecl]) -> Vec<&'a TypeDecl> {
     // Build a map for O(1) lookup.
-    let map: HashMap<&str, &TypeDecl> =
-        all_types.iter().map(|t| (t.name.as_str(), t)).collect();
+    let map: HashMap<&str, &TypeDecl> = all_types.iter().map(|t| (t.name.as_str(), t)).collect();
 
     // Collect the chain from this type upward.
     let mut chain: Vec<&TypeDecl> = Vec::new();
     let mut cur = type_name;
-    loop {
-        if let Some(decl) = map.get(cur) {
-            chain.push(decl);
-            match &decl.parent {
-                Some(p) if map.contains_key(p.name.as_str()) => cur = p.name.as_str(),
-                _ => break, // parent is Object or absent
-            }
-        } else {
-            break;
+    while let Some(decl) = map.get(cur) {
+        chain.push(decl);
+        match &decl.parent {
+            Some(p) if map.contains_key(p.name.as_str()) => cur = p.name.as_str(),
+            _ => break, // parent is Object or absent
         }
     }
     chain.reverse(); // root → leaf
@@ -653,8 +648,11 @@ fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
             // Ancestor attrs: bind ancestor ctor params to the args provided by
             // the child via `inherits Parent(args)`.
             let child = chain[i + 1];
-            let ancestor_param_names: Vec<&str> =
-                ancestor.type_params.iter().map(|p| p.name.as_str()).collect();
+            let ancestor_param_names: Vec<&str> = ancestor
+                .type_params
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect();
 
             if ancestor_param_names.is_empty() && ancestor.attributes.is_empty() {
                 continue;
@@ -662,8 +660,8 @@ fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
 
             body.push(Instr::BeginScope);
 
-            match &child.parent {
-                Some(parent_spec) => match &parent_spec.args {
+            if let Some(parent_spec) = &child.parent {
+                match &parent_spec.args {
                     // Explicit args: evaluate them in the current scope.
                     Some(explicit_args) => {
                         for (param_name, arg_expr) in
@@ -680,8 +678,7 @@ fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
                             body.push(Instr::BindVar(param_name.to_string()));
                         }
                     }
-                },
-                None => {}
+                }
             }
 
             lower_attrs_into_object(&ancestor.attributes, &mut body, &mut ctx);
@@ -705,10 +702,10 @@ fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
 /// the stack stays clean for subsequent attributes.
 fn lower_attrs_into_object(attrs: &[AttrDecl], body: &mut Vec<Instr>, ctx: &mut Ctx) {
     for attr in attrs {
-        lower_inner(&attr.init, body, ctx);          // push val
+        lower_inner(&attr.init, body, ctx); // push val
         body.push(Instr::LoadVar("__self".to_string())); // push obj on top
         body.push(Instr::SetField(attr.name.clone())); // pop obj, pop val, set, push val
-        body.push(Instr::Pop);                        // discard val
+        body.push(Instr::Pop); // discard val
     }
 }
 
@@ -736,7 +733,10 @@ fn lower_method(type_name: &str, parent_name: &str, decl: &hulk_ast::MethodDecl)
 /// `range(lo, hi)` is compiled to `Call("__builtin_range", 2)`.  The returned
 /// object supports the Iterable protocol (`hasNext`, `current`, `next`) so
 /// that `for (x in range(lo, hi)) body` can dispatch through `CallMethod`.
-fn register_range_builtins(funcs: &mut HashMap<String, IrFunc>, types: &mut HashMap<String, IrTypeInfo>) {
+fn register_range_builtins(
+    funcs: &mut HashMap<String, IrFunc>,
+    types: &mut HashMap<String, IrTypeInfo>,
+) {
     // __builtin_range(lo, hi) → Range object
     funcs.insert(
         "__builtin_range".to_string(),
@@ -870,7 +870,11 @@ pub fn lower_program(program: &Program) -> IrProgram {
     lower_inner(&program.entry, &mut entry, &mut ctx);
     entry.push(Instr::Ret);
 
-    IrProgram { funcs, types, entry }
+    IrProgram {
+        funcs,
+        types,
+        entry,
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1131,11 +1135,7 @@ mod tests {
         // d.speak()
         let expr = Expr {
             span: Span::default(),
-            kind: ExprKind::MethodCall(
-                Box::new(ident("d")),
-                "speak".to_string(),
-                vec![],
-            ),
+            kind: ExprKind::MethodCall(Box::new(ident("d")), "speak".to_string(), vec![]),
         };
         let mut out = Vec::new();
         lower_expr(&expr, &mut out);
@@ -1203,12 +1203,18 @@ mod tests {
 
         let ir = lower_program(&program);
 
-        assert!(ir.funcs.contains_key("__ctor_Point"), "missing __ctor_Point");
+        assert!(
+            ir.funcs.contains_key("__ctor_Point"),
+            "missing __ctor_Point"
+        );
         assert!(
             ir.funcs.contains_key("__method_Point_zero"),
             "missing __method_Point_zero"
         );
-        assert!(ir.types.contains_key("Point"), "missing type info for Point");
+        assert!(
+            ir.types.contains_key("Point"),
+            "missing type info for Point"
+        );
 
         let type_info = &ir.types["Point"];
         assert_eq!(type_info.parent, "Object");
