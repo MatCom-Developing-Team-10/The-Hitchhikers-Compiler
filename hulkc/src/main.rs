@@ -30,41 +30,44 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Run { file } => {
-            let source = std::fs::read_to_string(&file)
-                .with_context(|| format!("failed to read source file: {file}"))?;
-            let program = hulk_parser::parse(&source)
-                .map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
-
-            match hulk_semantic::analyze(&program) {
-                Ok(_ctx) => {
-                    // Backend not yet implemented.
-                    eprintln!("[ok] semantic analysis passed");
-                    eprintln!("[todo] IR lowering + VM execution not implemented yet");
-                }
-                Err(errs) => {
-                    for err in errs {
-                        eprintln!("{err} @ {}", err.span());
-                    }
-                    anyhow::bail!("semantic analysis failed");
-                }
-            }
-        }
-        Command::Parse { file } => {
-            let source = std::fs::read_to_string(&file)
-                .with_context(|| format!("failed to read source file: {file}"))?;
-            let program = hulk_parser::parse(&source)
-                .map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
-            println!("{program:#?}");
-        }
+        Command::Run { file } => cmd_run(&file),
+        Command::Parse { file } => cmd_parse(&file),
     }
+}
 
+fn cmd_run(file: &str) -> Result<()> {
+    let source = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read source file: {file}"))?;
+
+    let ast =
+        hulk_parser::parse(&source).map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
+
+    hulk_semantic::analyze(&ast).map_err(|errs| {
+        let msg = errs
+            .iter()
+            .map(|e| format!("  {e}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::anyhow!("semantic errors:\n{msg}")
+    })?;
+
+    let ir = hulk_ir::lower_program(&ast);
+
+    hulk_vm::Vm::run_program(ir).map_err(|e| anyhow::anyhow!("runtime error: {e}"))
+}
+
+fn cmd_parse(file: &str) -> Result<()> {
+    let source = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read source file: {file}"))?;
+
+    let ast =
+        hulk_parser::parse(&source).map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
+
+    println!("{ast:#?}");
     Ok(())
 }
 
 fn format_parse_error(source: &str, err: ParseError<'_>) -> String {
-    // Minimal formatting: include the parse error and, when possible, a span.
-    // We keep spans as byte offsets; caller can map to line/col later.
     match &err {
         lalrpop_util::ParseError::InvalidToken { location }
         | lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
