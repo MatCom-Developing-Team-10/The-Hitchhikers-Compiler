@@ -50,6 +50,15 @@ pub enum Token {
     /// `inherits` keyword (A.7.3).
     #[token("inherits")]
     Inherits,
+    /// `interface` keyword (extension: interfaces).
+    #[token("interface")]
+    Interface,
+    /// `implements` keyword (extension: interfaces).
+    #[token("implements")]
+    Implements,
+    /// `extends` keyword (extension: interface inheritance).
+    #[token("extends")]
+    Extends,
     /// `new` keyword (A.7.2).
     #[token("new")]
     New,
@@ -192,6 +201,9 @@ impl fmt::Display for Token {
             Token::Function => write!(f, "function"),
             Token::Type => write!(f, "type"),
             Token::Inherits => write!(f, "inherits"),
+            Token::Interface => write!(f, "interface"),
+            Token::Implements => write!(f, "implements"),
+            Token::Extends => write!(f, "extends"),
             Token::New => write!(f, "new"),
             Token::Is => write!(f, "is"),
             Token::As => write!(f, "as"),

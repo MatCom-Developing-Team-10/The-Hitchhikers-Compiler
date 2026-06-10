@@ -55,10 +55,12 @@ impl fmt::Display for Span {
 
 // ---------- Top-level ----------
 
-/// A complete HULK program: type declarations, function declarations, and a
-/// single entry expression.
+/// A complete HULK program: interface, type, and function declarations,
+/// plus a single entry expression.
 #[derive(Debug, Clone)]
 pub struct Program {
+    /// Interface declarations (extension).
+    pub interfaces: Vec<InterfaceDecl>,
     /// Type declarations (classes).
     pub types: Vec<TypeDecl>,
     /// Global function declarations.
@@ -160,11 +162,41 @@ pub struct TypeDecl {
     pub type_params: Vec<Param>,
     /// Optional parent type for inheritance.
     pub parent: Option<ParentSpec>,
+    /// Interfaces this type implements (extension). Empty when no `implements`.
+    pub implements: Vec<TypeRef>,
     /// Attribute declarations.
     pub attributes: Vec<AttrDecl>,
     /// Method declarations.
     pub methods: Vec<MethodDecl>,
     /// Source span covering the entire declaration.
+    pub span: Span,
+}
+
+/// An interface declaration (extension): a named contract of method signatures.
+#[derive(Debug, Clone)]
+pub struct InterfaceDecl {
+    /// Interface name.
+    pub name: String,
+    /// Generic type parameters (empty for non-generic interfaces).
+    pub generic_params: Vec<String>,
+    /// Parent interfaces (multiple inheritance allowed for interfaces only).
+    pub extends: Vec<TypeRef>,
+    /// Method signatures (no body).
+    pub methods: Vec<InterfaceMethodSig>,
+    /// Source span.
+    pub span: Span,
+}
+
+/// A method signature inside an interface (no body).
+#[derive(Debug, Clone)]
+pub struct InterfaceMethodSig {
+    /// Method name.
+    pub name: String,
+    /// Parameter list (does not include `self`).
+    pub params: Vec<Param>,
+    /// Optional return type annotation.
+    pub return_ty: Option<TypeRef>,
+    /// Source span.
     pub span: Span,
 }
 

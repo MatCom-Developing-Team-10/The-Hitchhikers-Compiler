@@ -75,6 +75,30 @@ pub enum SemError {
 
     #[error("`base()` is only valid when the parent declares a method with the same name")]
     BaseNoParentMethod { span: Span },
+
+    #[error("`{name}` is not an interface")]
+    NotAnInterface { name: String, span: Span },
+
+    #[error("type `{ty}` does not implement method `{method}` required by interface `{iface}`")]
+    MissingInterfaceMethod {
+        ty: String,
+        iface: String,
+        method: String,
+        span: Span,
+    },
+
+    #[error(
+        "method `{method}` in type `{ty}` has a different signature than the one required by interface `{iface}`"
+    )]
+    InterfaceSignatureMismatch {
+        ty: String,
+        iface: String,
+        method: String,
+        span: Span,
+    },
+
+    #[error("cannot instantiate interface `{name}` — use a concrete type")]
+    CannotInstantiateInterface { name: String, span: Span },
 }
 
 impl SemError {
@@ -98,6 +122,10 @@ impl SemError {
             | SemError::NonSelfFieldAssign { span }
             | SemError::BaseOutsideOverride { span }
             | SemError::BaseNoParentMethod { span } => *span,
+            SemError::NotAnInterface { span, .. }
+            | SemError::MissingInterfaceMethod { span, .. }
+            | SemError::InterfaceSignatureMismatch { span, .. }
+            | SemError::CannotInstantiateInterface { span, .. } => *span,
         }
     }
 }

@@ -39,6 +39,7 @@ fn b(v: bool) -> Expr {
 
 fn prog(entry: Expr) -> Program {
     Program {
+        interfaces: vec![],
         types: vec![],
         functions: vec![],
         entry,
@@ -157,6 +158,7 @@ fn type_attributes_and_method() {
             },
         ],
         parent: None,
+        implements: vec![],
         attributes: vec![
             AttrDecl {
                 name: "x".into(),
@@ -182,6 +184,7 @@ fn type_attributes_and_method() {
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![point],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
@@ -208,6 +211,7 @@ fn inheritance_with_base_call() {
         generic_params: vec![],
         type_params: vec![],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         methods: vec![method("greet", Some("String"), s("hi"))],
         span: Span::default(),
@@ -221,6 +225,7 @@ fn inheritance_with_base_call() {
             args: None,
             span: Span::default(),
         }),
+        implements: vec![],
         attributes: vec![],
         methods: vec![method(
             "greet",
@@ -230,6 +235,7 @@ fn inheritance_with_base_call() {
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![person, knight],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
@@ -287,11 +293,13 @@ fn cannot_inherit_from_builtin() {
             args: None,
             span: Span::default(),
         }),
+        implements: vec![],
         attributes: vec![],
         methods: vec![],
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![bad],
         functions: vec![],
         entry: n(0.0),
@@ -312,6 +320,7 @@ fn override_with_different_signature() {
         generic_params: vec![],
         type_params: vec![],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         methods: vec![method("f", Some("Number"), n(1.0))],
         span: Span::default(),
@@ -325,11 +334,13 @@ fn override_with_different_signature() {
             args: None,
             span: Span::default(),
         }),
+        implements: vec![],
         attributes: vec![],
         methods: vec![method("f", Some("String"), s("x"))],
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![p_type, q_type],
         functions: vec![],
         entry: n(0.0),
@@ -350,6 +361,7 @@ fn self_assign_is_rejected() {
         generic_params: vec![],
         type_params: vec![],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         methods: vec![method(
             "f",
@@ -362,6 +374,7 @@ fn self_assign_is_rejected() {
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![t],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
@@ -384,11 +397,13 @@ fn duplicate_type_reported() {
         generic_params: vec![],
         type_params: vec![],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         methods: vec![],
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![dup("X"), dup("X")],
         functions: vec![],
         entry: n(0.0),
@@ -414,12 +429,14 @@ fn base_outside_override_is_rejected() {
         generic_params: vec![],
         type_params: vec![],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         // `solo()` has no parent method to call — `base()` should be flagged.
         methods: vec![method("solo", None, e(ExprKind::Base(vec![])))],
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![t],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
@@ -473,6 +490,7 @@ fn explicit_inherits_args_are_typechecked() {
             span: Span::default(),
         }],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         methods: vec![],
         span: Span::default(),
@@ -486,11 +504,13 @@ fn explicit_inherits_args_are_typechecked() {
             args: Some(vec![s("hi")]),
             span: Span::default(),
         }),
+        implements: vec![],
         attributes: vec![],
         methods: vec![],
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![p_type, c_type],
         functions: vec![],
         entry: n(0.0),
@@ -506,11 +526,13 @@ fn reserved_type_names_are_rejected() {
         generic_params: vec![],
         type_params: vec![],
         parent: None,
+        implements: vec![],
         attributes: vec![],
         methods: vec![],
         span: Span::default(),
     };
     let p = Program {
+        interfaces: vec![],
         types: vec![t],
         functions: vec![],
         entry: n(0.0),

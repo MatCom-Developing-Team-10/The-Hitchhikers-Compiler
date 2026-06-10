@@ -15,21 +15,24 @@ extern {
 
     enum Token {
         // Keywords
-        "let"      => Token::Let,
-        "in"       => Token::In,
-        "if"       => Token::If,
-        "elif"     => Token::Elif,
-        "else"     => Token::Else,
-        "while"    => Token::While,
-        "for"      => Token::For,
-        "function" => Token::Function,
-        "type"     => Token::Type,
-        "inherits" => Token::Inherits,
-        "new"      => Token::New,
-        "is"       => Token::Is,
-        "as"       => Token::As,
-        "true"     => Token::True,
-        "false"    => Token::False,
+        "let"        => Token::Let,
+        "in"         => Token::In,
+        "if"         => Token::If,
+        "elif"       => Token::Elif,
+        "else"       => Token::Else,
+        "while"      => Token::While,
+        "for"        => Token::For,
+        "function"   => Token::Function,
+        "type"       => Token::Type,
+        "inherits"   => Token::Inherits,
+        "interface"  => Token::Interface,
+        "implements" => Token::Implements,
+        "extends"    => Token::Extends,
+        "new"        => Token::New,
+        "is"         => Token::Is,
+        "as"         => Token::As,
+        "true"       => Token::True,
+        "false"      => Token::False,
 
         // Operators
         "+"  => Token::Plus,
@@ -113,8 +116,39 @@ GenericArgs: Vec<TypeRef> = {
 // =====================================================================
 
 pub Program: Program = {
-    <types:TypeDecl*> <functions:FunctionDecl*> <entry:Expr> ";"? => {
-        Program { types, functions, entry }
+    <interfaces:InterfaceDecl*> <types:TypeDecl*> <functions:FunctionDecl*> <entry:Expr> ";"? => {
+        Program { interfaces, types, functions, entry }
+    },
+};
+
+// =====================================================================
+// Interface declarations (extension)
+// =====================================================================
+
+InterfaceDecl: InterfaceDecl = {
+    <lo:@L> "interface" <name:IdentStr> <gp:GenericParams?>
+        <ext:("extends" <Comma1<TypeRef>>)?>
+        "{" <methods:InterfaceMethodSig*> "}" <hi:@R> => {
+        InterfaceDecl {
+            name: name.to_string(),
+            generic_params: gp.unwrap_or_default(),
+            extends: ext.unwrap_or_default(),
+            methods,
+            span: Span::new(lo, hi),
+        }
+    },
+};
+
+InterfaceMethodSig: InterfaceMethodSig = {
+    // name(params)[: RetTy];
+    <lo:@L> <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
+        <ret:(":" <TypeRef>)?> ";" <hi:@R> => {
+        InterfaceMethodSig {
+            name: name.to_string(),
+            params,
+            return_ty: ret,
+            span: Span::new(lo, hi),
+        }
     },
 };
 
@@ -123,35 +157,44 @@ pub Program: Program = {
 // =====================================================================
 
 TypeDecl: TypeDecl = {
-    // type Name[T,U](params) [inherits Parent(args)] { body }
+    // type Name[T,U](params) [inherits Parent(args)] [implements I1, I2] { body }
     <lo:@L> "type" <name:IdentStr> <gp:GenericParams?>
         "(" <params:Comma<TypeParam>> ")"
         <parent:InheritsClause?>
+        <impls:ImplementsClause?>
         "{" <body:TypeBody> "}" <hi:@R> => {
         TypeDecl {
             name: name.to_string(),
             generic_params: gp.unwrap_or_default(),
             type_params: params,
             parent,
+            implements: impls.unwrap_or_default(),
             attributes: body.0,
             methods: body.1,
             span: Span::new(lo, hi),
         }
     },
-    // type Name[T,U] [inherits Parent(args)] { body }  (no constructor params)
+    // type Name[T,U] [inherits Parent(args)] [implements I1, I2] { body }  (no ctor params)
     <lo:@L> "type" <name:IdentStr> <gp:GenericParams?>
         <parent:InheritsClause?>
+        <impls:ImplementsClause?>
         "{" <body:TypeBody> "}" <hi:@R> => {
         TypeDecl {
             name: name.to_string(),
             generic_params: gp.unwrap_or_default(),
             type_params: vec![],
             parent,
+            implements: impls.unwrap_or_default(),
             attributes: body.0,
             methods: body.1,
             span: Span::new(lo, hi),
         }
     },
+};
+
+// Implements clause: a comma-separated list of interface references.
+ImplementsClause: Vec<TypeRef> = {
+    "implements" <ifaces:Comma1<TypeRef>> => ifaces,
 };
 
 TypeParam: Param = {

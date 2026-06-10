@@ -68,7 +68,77 @@ Ver [tests/extension/generics.hulk](../tests/extension/generics.hulk).
 
 ## 2. Interfaces
 
-*(Pendiente — commit 2)*
+**Sintaxis:** declaracion `interface Name [extends I, J] { metodos; }` y clausula `implements I1, I2` en tipos.
+
+**Estrategia:** subtyping **nominal** (un tipo conforma a una interfaz unicamente si declara `implements`); las interfaces son **borradas** en runtime — el dispatch dinamico ya existente por `type_name` se reutiliza, sin vtable separada.
+
+### Sintaxis
+
+```hulk
+// Interfaz simple
+interface Greeter {
+    greet(): String;
+}
+
+// Interfaz con herencia multiple
+interface Ord { compare(): Number; }
+interface Eq  { equals(): Boolean; }
+interface Comparable extends Ord, Eq {
+    min(): Number;
+}
+
+// Interfaz generica
+interface Container[T] {
+    get(): T;
+    put(x: T): T;
+}
+
+// Tipo que implementa una o varias interfaces
+type Person(name: String) implements Greeter {
+    name: String = name;
+    greet(): String => "hi, " @ self.name;
+}
+
+// Combinacion con inherits
+type Dog(name: String) inherits Animal(name) implements Greeter {
+    greet(): String => "woof, " @ self.name;
+}
+
+// Variable de tipo interfaz: dispatch dinamico
+let g: Greeter = new Person("kevin") in print(g.greet());
+```
+
+### Reglas semanticas
+
+| Regla | Comportamiento |
+|-------|----------------|
+| **Implementacion obligatoria** | `T implements I` requiere que `T` (o un ancestro) provea todos los metodos de `I` (y los heredados via `extends`) con la firma exacta. |
+| **No instanciable** | `new Greeter()` es error — solo tipos concretos se instancian. |
+| **Implements solo sobre interfaces** | `type X implements Y` con `Y` siendo un tipo concreto → error `NotAnInterface`. |
+| **Subtyping nominal** | `Person` conforma a `Greeter` solo si declara `implements Greeter`. La presencia de un metodo `greet()` no basta. |
+| **Subtyping transitivo** | `Dog` hereda de `Animal`; si `Animal implements Greeter`, entonces `Dog` tambien conforma a `Greeter`. |
+| **Multiple implementacion** | Un tipo puede implementar varias interfaces (`implements A, B`); las clases solo heredan de una. |
+| **Erasure runtime** | El IR/VM no ven interfaces. El dispatch dinamico ya existente resuelve los metodos por `type_name` del objeto concreto. |
+
+### Cambios en la implementacion
+
+| Capa | Cambio |
+|------|--------|
+| Lexer | Tokens `interface`, `implements`, `extends` |
+| AST | Nuevos `InterfaceDecl` y `InterfaceMethodSig`; `interfaces: Vec<InterfaceDecl>` en `Program`; `implements: Vec<TypeRef>` en `TypeDecl` |
+| Parser | Regla `InterfaceDecl`, `InterfaceMethodSig`, `ImplementsClause`; nueva forma `Program` |
+| Semantic | `InterfaceInfo` y `interfaces` map en `TypeCtx`; nueva pasada `check_interfaces` (entre `sign` y `check_overrides`); `lookup_interface_method`; `implements_interface` y `interface_extends` en `conforms` |
+| IR / VM | Sin cambios. Las interfaces son borradas. |
+
+### Ejemplo end-to-end
+
+Ver [tests/extension/interfaces.hulk](../tests/extension/interfaces.hulk).
+
+### Comparativa con otros lenguajes
+
+- **Java/Kotlin/Swift**: subtyping nominal con `implements`/`:`. HULK sigue este modelo.
+- **Go**: subtyping estructural (cualquier tipo que tenga los metodos conforma). HULK eligio nominal para evitar acoplamientos accidentales.
+- **TypeScript**: estructural por default. Diferente filosofia.
 
 ---
 

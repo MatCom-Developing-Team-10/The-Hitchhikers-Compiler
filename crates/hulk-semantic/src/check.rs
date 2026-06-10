@@ -84,7 +84,40 @@ impl Checker {
                     generic_params: td.generic_params.clone(),
                     ctor_params: Vec::new(),
                     parent_args: td.parent.as_ref().and_then(|p| p.args.clone()),
+                    implements: Vec::new(),
                     attrs: HashMap::new(),
+                    methods: HashMap::new(),
+                },
+            );
+        }
+
+        // Register interface names (extension). Must not collide with types
+        // or builtins. Methods are filled in during the `sign` pass.
+        for iface in &prog.interfaces {
+            if matches!(
+                iface.name.as_str(),
+                "Number" | "String" | "Boolean" | "Object"
+            ) {
+                self.errors.push(SemError::ReservedTypeName {
+                    name: iface.name.clone(),
+                    span: iface.span,
+                });
+                continue;
+            }
+            if self.ctx.types.contains_key(&iface.name)
+                || self.ctx.interfaces.contains_key(&iface.name)
+            {
+                self.errors.push(SemError::DuplicateType {
+                    name: iface.name.clone(),
+                    span: iface.span,
+                });
+                continue;
+            }
+            self.ctx.interfaces.insert(
+                iface.name.clone(),
+                crate::types::InterfaceInfo {
+                    generic_params: iface.generic_params.clone(),
+                    extends: Vec::new(),
                     methods: HashMap::new(),
                 },
             );
@@ -279,9 +312,95 @@ impl Checker {
                     },
                 );
             }
+            // Resolve the `implements` clause to concrete Type values, reporting
+            // unknown names and non-interface targets.
+            let implements: Vec<Type> = td
+                .implements
+                .iter()
+                .filter_map(
+                    |tref| match self.ctx.resolve_type_ref_in_scope(tref, &scope) {
+                        Some(t) => {
+                            if let Some(base) = t.base_name() {
+                                if !self.ctx.is_interface(base) {
+                                    self.errors.push(SemError::NotAnInterface {
+                                        name: base.to_string(),
+                                        span: td.span,
+                                    });
+                                    return None;
+                                }
+                            }
+                            Some(t)
+                        }
+                        None => {
+                            self.errors.push(SemError::UndefinedType {
+                                name: tref.to_string(),
+                                span: td.span,
+                            });
+                            None
+                        }
+                    },
+                )
+                .collect();
             if let Some(info) = self.ctx.types.get_mut(&td.name) {
                 info.ctor_params = ctor_params;
                 info.attrs = attrs;
+                info.methods = methods;
+                info.implements = implements;
+            }
+        }
+
+        // Fill in interface methods and `extends`.
+        for iface in &prog.interfaces {
+            let scope = iface.generic_params.clone();
+            let extends: Vec<Type> = iface
+                .extends
+                .iter()
+                .filter_map(
+                    |tref| match self.ctx.resolve_type_ref_in_scope(tref, &scope) {
+                        Some(t) => {
+                            if let Some(base) = t.base_name() {
+                                if !self.ctx.is_interface(base) {
+                                    self.errors.push(SemError::NotAnInterface {
+                                        name: base.to_string(),
+                                        span: iface.span,
+                                    });
+                                    return None;
+                                }
+                            }
+                            Some(t)
+                        }
+                        None => {
+                            self.errors.push(SemError::UndefinedType {
+                                name: tref.to_string(),
+                                span: iface.span,
+                            });
+                            None
+                        }
+                    },
+                )
+                .collect();
+            let mut methods = HashMap::new();
+            for m in &iface.methods {
+                let params = m
+                    .params
+                    .iter()
+                    .map(|p| self.resolve_or_default(p.ty.as_ref(), &scope, p.span))
+                    .collect();
+                let returns = match &m.return_ty {
+                    Some(tref) => self.resolve_or_default(Some(tref), &scope, m.span),
+                    None => Type::Object,
+                };
+                methods.insert(
+                    m.name.clone(),
+                    MethodSig {
+                        params,
+                        returns,
+                        owner: iface.name.clone(),
+                    },
+                );
+            }
+            if let Some(info) = self.ctx.interfaces.get_mut(&iface.name) {
+                info.extends = extends;
                 info.methods = methods;
             }
         }
@@ -300,6 +419,93 @@ impl Checker {
                 }
             },
             None => Type::Object,
+        }
+    }
+
+    // ----------------------------------- pass 2.4: interface implementation
+    //
+    // Verify that every type with an `implements` clause provides each method
+    // required by the interface (including inherited interface methods via
+    // `extends`), with matching parameter and return types after substituting
+    // the interface's generic parameters.
+    pub fn check_interfaces(&mut self, prog: &Program) {
+        for td in &prog.types {
+            let Some(info) = self.ctx.types.get(&td.name).cloned() else {
+                continue;
+            };
+            for iface_ty in &info.implements {
+                let (iface_name, iface_args) = match iface_ty {
+                    Type::User(n) => (n.clone(), Vec::new()),
+                    Type::Generic(n, args) => (n.clone(), args.clone()),
+                    _ => continue,
+                };
+                let required = self.collect_required_methods(&iface_name);
+                for (method_name, required_sig) in required {
+                    // Substitute interface's generic params with the args used in `implements`.
+                    let iface_info = match self.ctx.interfaces.get(&iface_name) {
+                        Some(i) => i,
+                        None => continue,
+                    };
+                    let subst: HashMap<String, Type> = iface_info
+                        .generic_params
+                        .iter()
+                        .cloned()
+                        .zip(iface_args.iter().cloned())
+                        .collect();
+                    let required_params: Vec<Type> = required_sig
+                        .params
+                        .iter()
+                        .map(|p| self.ctx.substitute(p, &subst))
+                        .collect();
+                    let required_returns = self.ctx.substitute(&required_sig.returns, &subst);
+
+                    let own = self.lookup_inherited_method(&td.name, &method_name);
+                    match own {
+                        None => {
+                            self.errors.push(SemError::MissingInterfaceMethod {
+                                ty: td.name.clone(),
+                                iface: iface_name.clone(),
+                                method: method_name.clone(),
+                                span: td.span,
+                            });
+                        }
+                        Some(own_sig) => {
+                            if own_sig.params != required_params
+                                || own_sig.returns != required_returns
+                            {
+                                self.errors.push(SemError::InterfaceSignatureMismatch {
+                                    ty: td.name.clone(),
+                                    iface: iface_name.clone(),
+                                    method: method_name,
+                                    span: td.span,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Collect every method that a type implementing `iface` must provide,
+    /// including those inherited from interfaces in the `extends` chain.
+    fn collect_required_methods(&self, iface: &str) -> HashMap<String, MethodSig> {
+        let mut out = HashMap::new();
+        self.collect_required_methods_into(iface, &mut out);
+        out
+    }
+
+    fn collect_required_methods_into(&self, iface: &str, out: &mut HashMap<String, MethodSig>) {
+        let Some(info) = self.ctx.interfaces.get(iface) else {
+            return;
+        };
+        for ext in &info.extends {
+            if let Some(base) = ext.base_name() {
+                self.collect_required_methods_into(base, out);
+            }
+        }
+        for (name, sig) in &info.methods {
+            out.insert(name.clone(), sig.clone());
         }
     }
 
@@ -345,6 +551,22 @@ impl Checker {
             return Some(sig.clone());
         }
         self.lookup_inherited_method(&info.parent, name)
+    }
+
+    /// Look up a method declared by an interface (including its `extends` chain).
+    fn lookup_interface_method(&self, iface: &str, name: &str) -> Option<MethodSig> {
+        let info = self.ctx.interfaces.get(iface)?;
+        if let Some(sig) = info.methods.get(name) {
+            return Some(sig.clone());
+        }
+        for ext in &info.extends {
+            if let Some(base) = ext.base_name() {
+                if let Some(sig) = self.lookup_interface_method(base, name) {
+                    return Some(sig);
+                }
+            }
+        }
+        None
     }
 
     fn lookup_inherited_attr(&self, ty: &str, name: &str) -> Option<Type> {
@@ -572,21 +794,44 @@ impl Checker {
                 let rt = self.check_expr(env, recv);
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(env, a)).collect();
                 let (sig, subst) = match &rt {
-                    Type::User(tn) => (self.lookup_inherited_method(tn, name), HashMap::new()),
+                    Type::User(tn) => {
+                        if self.ctx.is_interface(tn) {
+                            (self.lookup_interface_method(tn, name), HashMap::new())
+                        } else {
+                            (self.lookup_inherited_method(tn, name), HashMap::new())
+                        }
+                    }
                     Type::Generic(tn, targs) => {
-                        let sig = self.lookup_inherited_method(tn, name);
-                        let subst = self
-                            .ctx
-                            .types
-                            .get(tn)
-                            .map(|info| {
-                                info.generic_params
-                                    .iter()
-                                    .cloned()
-                                    .zip(targs.iter().cloned())
-                                    .collect()
-                            })
-                            .unwrap_or_default();
+                        let subst: HashMap<String, Type> = if self.ctx.is_interface(tn) {
+                            self.ctx
+                                .interfaces
+                                .get(tn)
+                                .map(|info| {
+                                    info.generic_params
+                                        .iter()
+                                        .cloned()
+                                        .zip(targs.iter().cloned())
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            self.ctx
+                                .types
+                                .get(tn)
+                                .map(|info| {
+                                    info.generic_params
+                                        .iter()
+                                        .cloned()
+                                        .zip(targs.iter().cloned())
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        };
+                        let sig = if self.ctx.is_interface(tn) {
+                            self.lookup_interface_method(tn, name)
+                        } else {
+                            self.lookup_inherited_method(tn, name)
+                        };
                         (sig, subst)
                     }
                     _ => (None, HashMap::new()),
@@ -819,6 +1064,13 @@ impl Checker {
 
             ExprKind::New(tname, type_args, args) => {
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(env, a)).collect();
+                if self.ctx.is_interface(tname) {
+                    self.errors.push(SemError::CannotInstantiateInterface {
+                        name: tname.clone(),
+                        span: e.span,
+                    });
+                    return Type::Error;
+                }
                 let Some(info) = self.ctx.types.get(tname).cloned() else {
                     self.errors.push(SemError::UndefinedType {
                         name: tname.clone(),
@@ -1008,6 +1260,7 @@ pub fn analyze(prog: &Program) -> Result<TypeCtx, Vec<SemError>> {
     let mut c = Checker::new();
     c.collect(prog);
     c.sign(prog);
+    c.check_interfaces(prog);
     c.check_overrides(prog);
     c.check_bodies(prog);
     if c.errors.is_empty() {

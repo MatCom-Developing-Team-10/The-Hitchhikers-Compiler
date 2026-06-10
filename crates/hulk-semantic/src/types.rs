@@ -85,13 +85,30 @@ pub struct TypeInfo {
     pub ctor_params: Vec<(String, Type)>,
     /// `None` means "forward our own ctor params to the parent" (A.7.3 default).
     pub parent_args: Option<Vec<Expr>>,
+    /// Interfaces this type implements (extension). Resolved to Type values
+    /// (typically `Type::User(name)` or `Type::Generic(...)`).
+    pub implements: Vec<Type>,
     pub attrs: HashMap<String, Type>,
+    pub methods: HashMap<String, MethodSig>,
+}
+
+/// Information about a declared interface (extension).
+#[derive(Clone, Debug)]
+pub struct InterfaceInfo {
+    /// Generic type parameters declared by this interface.
+    pub generic_params: Vec<String>,
+    /// Parent interfaces (multiple inheritance allowed via `extends`).
+    pub extends: Vec<Type>,
+    /// Method signatures (no body).
     pub methods: HashMap<String, MethodSig>,
 }
 
 #[derive(Default, Debug)]
 pub struct TypeCtx {
     pub types: HashMap<String, TypeInfo>,
+    /// Interface registry (extension). Disjoint from `types`: a name cannot
+    /// be both a type and an interface.
+    pub interfaces: HashMap<String, InterfaceInfo>,
     pub funcs: HashMap<String, FunctionSig>,
     pub builtin_consts: HashMap<String, Type>,
 }
@@ -174,13 +191,15 @@ impl TypeCtx {
 
         Self {
             types: HashMap::new(),
+            interfaces: HashMap::new(),
             funcs,
             builtin_consts,
         }
     }
 
-    /// Resolve a syntactic type name (`"Number"`, `"Point"`, etc.) to a `Type`.
-    /// Treats unknown names as user types only when they are registered.
+    /// Resolve a syntactic type name (`"Number"`, `"Point"`, `"Comparable"`, etc.)
+    /// to a `Type`. Treats unknown names as user types only when they are
+    /// registered as either a type or an interface.
     pub fn resolve_name(&self, name: &str) -> Option<Type> {
         match name {
             "Number" => Some(Type::Number),
@@ -188,8 +207,14 @@ impl TypeCtx {
             "Boolean" => Some(Type::Boolean),
             "Object" => Some(Type::Object),
             other if self.types.contains_key(other) => Some(Type::User(other.into())),
+            other if self.interfaces.contains_key(other) => Some(Type::User(other.into())),
             _ => None,
         }
+    }
+
+    /// Returns true if `name` is a declared interface.
+    pub fn is_interface(&self, name: &str) -> bool {
+        self.interfaces.contains_key(name)
     }
 
     /// Resolve a `TypeRef` (which may carry generic arguments) to a `Type`.
@@ -256,7 +281,11 @@ impl TypeCtx {
     /// 4. `Number`, `String`, `Boolean` conform only to themselves and to `Object`.
     /// 5. Generic types conform invariantly: `T[A]` ≤ `T[B]` iff `A == B`.
     /// 6. Type parameters (`Param`) conform only to themselves and `Object`.
-    /// 7. Otherwise: walk the parent chain of `a`; if it reaches `b`, conform.
+    /// 7. **Interfaces (extension):** `a` conforms to interface `b` if `a`
+    ///    (or one of its ancestors in the inheritance chain) declares
+    ///    `implements b`, or one of those implemented interfaces transitively
+    ///    extends `b`.
+    /// 8. Otherwise: walk the parent chain of `a`; if it reaches `b`, conform.
     pub fn conforms(&self, a: &Type, b: &Type) -> bool {
         if matches!(a, Type::Error) || matches!(b, Type::Error) {
             return true;
@@ -273,22 +302,23 @@ impl TypeCtx {
         ) {
             return false;
         }
-        // Generic invariance: only equal heads + equal args conform (handled by `a == b` above).
-        // Different heads or different args: walk parent chain of `a`'s base.
         let cur_base = match a {
             Type::User(n) | Type::Generic(n, _) => n.clone(),
             _ => return false,
         };
-        // Target base name (only `User` / `Generic` accepted as targets here).
         let target_base = match b {
             Type::User(n) | Type::Generic(n, _) => n.clone(),
             _ => return false,
         };
+        // Interface subtyping (extension): if `b` names an interface, walk `a`'s
+        // implements chain (own + ancestors) and check transitive interface extends.
+        if self.is_interface(&target_base) {
+            return self.implements_interface(&cur_base, &target_base);
+        }
+        // Generic invariance: only equal heads + equal args conform (handled by `a == b` above).
         let mut cur = cur_base;
         while let Some(info) = self.types.get(&cur) {
             if info.parent == target_base {
-                // For generic targets we still require structural equality (already handled).
-                // For non-generic targets (`Type::User`), parent-chain reach is enough.
                 if let Type::Generic(_, _) = b {
                     return false;
                 }
@@ -298,6 +328,44 @@ impl TypeCtx {
                 return false;
             }
             cur = info.parent.clone();
+        }
+        false
+    }
+
+    /// Returns true if type `tname` (or any of its ancestors) declares
+    /// `implements iface`, transitively through interface `extends`.
+    fn implements_interface(&self, tname: &str, iface: &str) -> bool {
+        let mut cur = tname.to_string();
+        while let Some(info) = self.types.get(&cur) {
+            for t in &info.implements {
+                if let Some(base) = t.base_name() {
+                    if base == iface || self.interface_extends(base, iface) {
+                        return true;
+                    }
+                }
+            }
+            if info.parent == "Object" {
+                return false;
+            }
+            cur = info.parent.clone();
+        }
+        false
+    }
+
+    /// Returns true if interface `from` extends `to` transitively.
+    fn interface_extends(&self, from: &str, to: &str) -> bool {
+        if from == to {
+            return true;
+        }
+        let Some(info) = self.interfaces.get(from) else {
+            return false;
+        };
+        for ext in &info.extends {
+            if let Some(base) = ext.base_name() {
+                if self.interface_extends(base, to) {
+                    return true;
+                }
+            }
         }
         false
     }

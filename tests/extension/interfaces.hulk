@@ -1,0 +1,22 @@
+// Interfaces extension demo.
+//
+// `Greeter` is an interface; `Person` and `Robot` implement it independently.
+// The variable `g: Greeter` can hold either, and the runtime dispatches by
+// the actual object's type (interfaces are erased — no vtable separate from
+// the existing virtual method table).
+
+interface Greeter {
+    greet(): String;
+}
+
+type Person(name: String) implements Greeter {
+    name: String = name;
+    greet(): String => "hi, my name is " @ self.name;
+}
+
+type Robot(id: Number) implements Greeter {
+    id: Number = id;
+    greet(): String => "beep, unit #" @ self.id;
+}
+
+let g: Greeter = new Person("kevin") in print(g.greet());

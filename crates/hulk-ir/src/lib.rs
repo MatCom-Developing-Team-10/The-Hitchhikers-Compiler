@@ -910,6 +910,7 @@ mod tests {
 
     fn mk_program(entry: Expr) -> Program {
         Program {
+            interfaces: vec![],
             types: vec![],
             functions: vec![],
             entry,
@@ -1187,6 +1188,7 @@ mod tests {
                 span: Span::default(),
             }],
             parent: None,
+            implements: vec![],
             attributes: vec![AttrDecl {
                 name: "x".to_string(),
                 ty: None,
@@ -1204,6 +1206,7 @@ mod tests {
         };
 
         let program = Program {
+            interfaces: vec![],
             types: vec![type_decl],
             functions: vec![],
             entry: num(0.0),
