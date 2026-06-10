@@ -399,8 +399,11 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
 
         // ── OOP ──────────────────────────────────────────────────────────────
 
-        // new Type(args) → lower args, Call("__ctor_Type", n)
-        ExprKind::New(type_name, args) => {
+        // new Type[T1, T2](args) → lower args, Call("__ctor_Type", n)
+        // Generic type arguments are erased at runtime — only the base type
+        // name matters for vtable lookup. `List[Number]` and `List[String]`
+        // share the same runtime representation.
+        ExprKind::New(type_name, _type_args, args) => {
             for arg in args {
                 lower_inner(arg, out, ctx);
             }
@@ -455,16 +458,16 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             ));
         }
 
-        // expr is Type
-        ExprKind::Is(expr, type_name) => {
+        // expr is Type  (type erasure: only the base name matters at runtime)
+        ExprKind::Is(expr, type_ref) => {
             lower_inner(expr, out, ctx);
-            out.push(Instr::IsType(type_name.clone()));
+            out.push(Instr::IsType(type_ref.base_name().to_string()));
         }
 
-        // expr as Type
-        ExprKind::As(expr, type_name) => {
+        // expr as Type  (type erasure: only the base name matters at runtime)
+        ExprKind::As(expr, type_ref) => {
             lower_inner(expr, out, ctx);
-            out.push(Instr::AsType(type_name.clone()));
+            out.push(Instr::AsType(type_ref.base_name().to_string()));
         }
     }
 }
@@ -1078,6 +1081,7 @@ mod tests {
             span: Span::default(),
             kind: ExprKind::New(
                 "Dog".to_string(),
+                vec![],
                 vec![Expr {
                     span: Span::default(),
                     kind: ExprKind::String("Rex".to_string()),
@@ -1153,7 +1157,10 @@ mod tests {
         // d is Animal
         let expr = Expr {
             span: Span::default(),
-            kind: ExprKind::Is(Box::new(ident("d")), "Animal".to_string()),
+            kind: ExprKind::Is(
+                Box::new(ident("d")),
+                hulk_ast::TypeRef::Simple("Animal".to_string()),
+            ),
         };
         let mut out = Vec::new();
         lower_expr(&expr, &mut out);
@@ -1173,6 +1180,7 @@ mod tests {
         // type Point(x: Number) { x = x; zero() => 0; }
         let type_decl = TypeDecl {
             name: "Point".to_string(),
+            generic_params: vec![],
             type_params: vec![Param {
                 name: "x".to_string(),
                 ty: None,

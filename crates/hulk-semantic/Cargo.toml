@@ -10,3 +10,6 @@ description = "Semantic analysis, symbol table, and type checking for HULK."
 [dependencies]
 hulk-ast = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+hulk-parser = { workspace = true }

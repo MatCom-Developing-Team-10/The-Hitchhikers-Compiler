@@ -127,7 +127,7 @@ fn method(name: &str, return_ty: Option<&str>, body: Expr) -> MethodDecl {
     MethodDecl {
         name: name.into(),
         params: vec![],
-        return_ty: return_ty.map(String::from),
+        return_ty: return_ty.map(TypeRef::from),
         body,
         span: Span::default(),
     }
@@ -143,6 +143,7 @@ fn type_attributes_and_method() {
     // (new Point(3, 4)).getX()
     let point = TypeDecl {
         name: "Point".into(),
+        generic_params: vec![],
         type_params: vec![
             Param {
                 name: "x".into(),
@@ -184,7 +185,11 @@ fn type_attributes_and_method() {
         types: vec![point],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
-            Box::new(e(ExprKind::New("Point".into(), vec![n(3.0), n(4.0)]))),
+            Box::new(e(ExprKind::New(
+                "Point".into(),
+                vec![],
+                vec![n(3.0), n(4.0)],
+            ))),
             "getX".into(),
             vec![],
         )),
@@ -200,6 +205,7 @@ fn inheritance_with_base_call() {
     // (new Knight()).greet()
     let person = TypeDecl {
         name: "Person".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: None,
         attributes: vec![],
@@ -208,6 +214,7 @@ fn inheritance_with_base_call() {
     };
     let knight = TypeDecl {
         name: "Knight".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: Some(ParentSpec {
             name: "Person".into(),
@@ -226,7 +233,7 @@ fn inheritance_with_base_call() {
         types: vec![person, knight],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
-            Box::new(e(ExprKind::New("Knight".into(), vec![]))),
+            Box::new(e(ExprKind::New("Knight".into(), vec![], vec![]))),
             "greet".into(),
             vec![],
         )),
@@ -273,6 +280,7 @@ fn type_mismatch_in_let_annotation() {
 fn cannot_inherit_from_builtin() {
     let bad = TypeDecl {
         name: "Bad".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: Some(ParentSpec {
             name: "Number".into(),
@@ -301,6 +309,7 @@ fn override_with_different_signature() {
     // type Q inherits P { f(): String => "x"; }     <-- mismatch
     let p_type = TypeDecl {
         name: "P".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: None,
         attributes: vec![],
@@ -309,6 +318,7 @@ fn override_with_different_signature() {
     };
     let q_type = TypeDecl {
         name: "Q".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: Some(ParentSpec {
             name: "P".into(),
@@ -337,6 +347,7 @@ fn self_assign_is_rejected() {
     // We exercise the rule directly through an Assign target named "self".
     let t = TypeDecl {
         name: "T".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: None,
         attributes: vec![],
@@ -345,7 +356,7 @@ fn self_assign_is_rejected() {
             None,
             e(ExprKind::Assign(
                 "self".into(),
-                Box::new(e(ExprKind::New("T".into(), vec![]))),
+                Box::new(e(ExprKind::New("T".into(), vec![], vec![]))),
             )),
         )],
         span: Span::default(),
@@ -354,7 +365,7 @@ fn self_assign_is_rejected() {
         types: vec![t],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
-            Box::new(e(ExprKind::New("T".into(), vec![]))),
+            Box::new(e(ExprKind::New("T".into(), vec![], vec![]))),
             "f".into(),
             vec![],
         )),
@@ -370,6 +381,7 @@ fn self_assign_is_rejected() {
 fn duplicate_type_reported() {
     let dup = |n: &str| TypeDecl {
         name: n.into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: None,
         attributes: vec![],
@@ -399,6 +411,7 @@ fn arity_mismatch_on_builtin_call() {
 fn base_outside_override_is_rejected() {
     let t = TypeDecl {
         name: "Solo".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: None,
         attributes: vec![],
@@ -410,7 +423,7 @@ fn base_outside_override_is_rejected() {
         types: vec![t],
         functions: vec![],
         entry: e(ExprKind::MethodCall(
-            Box::new(e(ExprKind::New("Solo".into(), vec![]))),
+            Box::new(e(ExprKind::New("Solo".into(), vec![], vec![]))),
             "solo".into(),
             vec![],
         )),
@@ -453,6 +466,7 @@ fn explicit_inherits_args_are_typechecked() {
     // type C inherits P("hi") { }    -- mismatch
     let p_type = TypeDecl {
         name: "P".into(),
+        generic_params: vec![],
         type_params: vec![Param {
             name: "x".into(),
             ty: Some("Number".into()),
@@ -465,6 +479,7 @@ fn explicit_inherits_args_are_typechecked() {
     };
     let c_type = TypeDecl {
         name: "C".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: Some(ParentSpec {
             name: "P".into(),
@@ -488,6 +503,7 @@ fn explicit_inherits_args_are_typechecked() {
 fn reserved_type_names_are_rejected() {
     let t = TypeDecl {
         name: "Number".into(),
+        generic_params: vec![],
         type_params: vec![],
         parent: None,
         attributes: vec![],

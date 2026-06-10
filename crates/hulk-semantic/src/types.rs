@@ -1,6 +1,16 @@
 //! Type representation and the conformance / LCA algorithms (HULK spec A.8.4).
+//!
+//! Generics extension (type erasure):
+//! - `Type::Generic(name, args)` is an instantiated generic type like `List[Number]`.
+//! - `Type::Param(name)` is an unresolved type parameter `T` inside a generic
+//!   declaration's body. It conforms to itself and to `Object` only.
+//! - Generic conformance is **invariant** in its arguments — `List[Animal]` does
+//!   NOT conform to `List[Object]`. This avoids variance surprises in a
+//!   teaching language and matches Java's behavior for raw generics.
+//! - At runtime, generics are erased: `List[Number]` and `List[String]` both
+//!   reduce to a `List` object with the same vtable.
 
-use crate::ast::Expr;
+use crate::ast::{Expr, TypeRef};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -9,20 +19,44 @@ pub enum Type {
     String,
     Boolean,
     Object,
+    /// A non-generic user-defined type (e.g., `Point`).
     User(String),
+    /// An instantiated generic type (e.g., `List[Number]`, `Map[String, Point]`).
+    Generic(String, Vec<Type>),
+    /// An unresolved type parameter inside a generic declaration's scope.
+    Param(String),
     /// Poison value — propagated after a reported error to silence cascades.
     Error,
 }
 
 impl Type {
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> String {
         match self {
-            Type::Number => "Number",
-            Type::String => "String",
-            Type::Boolean => "Boolean",
-            Type::Object => "Object",
-            Type::User(n) => n,
-            Type::Error => "<error>",
+            Type::Number => "Number".into(),
+            Type::String => "String".into(),
+            Type::Boolean => "Boolean".into(),
+            Type::Object => "Object".into(),
+            Type::User(n) | Type::Param(n) => n.clone(),
+            Type::Generic(n, args) => {
+                let mut s = format!("{n}[");
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        s.push_str(", ");
+                    }
+                    s.push_str(&a.name());
+                }
+                s.push(']');
+                s
+            }
+            Type::Error => "<error>".into(),
+        }
+    }
+
+    /// Return the base (erased) name for runtime lookup: `List[Number]` → `List`.
+    pub fn base_name(&self) -> Option<&str> {
+        match self {
+            Type::User(n) | Type::Generic(n, _) | Type::Param(n) => Some(n),
+            _ => None,
         }
     }
 }
@@ -39,11 +73,15 @@ pub struct MethodSig {
 pub struct FunctionSig {
     pub params: Vec<Type>,
     pub returns: Type,
+    /// Generic type parameters of this function (empty for non-generic functions).
+    pub generic_params: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TypeInfo {
     pub parent: String,
+    /// Generic type parameters declared by this type (empty for non-generic types).
+    pub generic_params: Vec<String>,
     pub ctor_params: Vec<(String, Type)>,
     /// `None` means "forward our own ctor params to the parent" (A.7.3 default).
     pub parent_args: Option<Vec<Expr>>,
@@ -67,6 +105,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Object],
                 returns: Type::Object,
+                generic_params: vec![],
             },
         );
         funcs.insert(
@@ -74,6 +113,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Number],
                 returns: Type::Number,
+                generic_params: vec![],
             },
         );
         funcs.insert(
@@ -81,6 +121,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Number],
                 returns: Type::Number,
+                generic_params: vec![],
             },
         );
         funcs.insert(
@@ -88,6 +129,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Number],
                 returns: Type::Number,
+                generic_params: vec![],
             },
         );
         funcs.insert(
@@ -95,6 +137,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Number],
                 returns: Type::Number,
+                generic_params: vec![],
             },
         );
         funcs.insert(
@@ -102,6 +145,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Number, Type::Number],
                 returns: Type::Number,
+                generic_params: vec![],
             },
         );
         funcs.insert(
@@ -109,6 +153,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![],
                 returns: Type::Number,
+                generic_params: vec![],
             },
         );
         // `range(a, b)` is leniently typed: it produces "something iterable of Number".
@@ -119,6 +164,7 @@ impl TypeCtx {
             FunctionSig {
                 params: vec![Type::Number, Type::Number],
                 returns: Type::Object,
+                generic_params: vec![],
             },
         );
 
@@ -134,6 +180,7 @@ impl TypeCtx {
     }
 
     /// Resolve a syntactic type name (`"Number"`, `"Point"`, etc.) to a `Type`.
+    /// Treats unknown names as user types only when they are registered.
     pub fn resolve_name(&self, name: &str) -> Option<Type> {
         match name {
             "Number" => Some(Type::Number),
@@ -145,6 +192,61 @@ impl TypeCtx {
         }
     }
 
+    /// Resolve a `TypeRef` (which may carry generic arguments) to a `Type`.
+    ///
+    /// - `Simple("Number")` → `Type::Number`
+    /// - `Simple("List")` (where `List` has 0 generic params) → `Type::User("List")`
+    /// - `Generic("List", [Number])` → `Type::Generic("List", [Number])`
+    ///
+    /// Returns `None` if the base name is unknown or the arity does not match
+    /// (caller reports a more specific diagnostic).
+    pub fn resolve_type_ref(&self, tref: &TypeRef) -> Option<Type> {
+        match tref {
+            TypeRef::Simple(name) => self.resolve_name(name),
+            TypeRef::Generic(name, args) => {
+                let resolved_args: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.resolve_type_ref(a).unwrap_or(Type::Error))
+                    .collect();
+                if let Some(info) = self.types.get(name) {
+                    if info.generic_params.len() == args.len() {
+                        return Some(Type::Generic(name.clone(), resolved_args));
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Resolve a `TypeRef` in a scope that includes generic type parameters
+    /// (e.g., inside `function map[T, U](...)`, `T` resolves to `Type::Param("T")`).
+    pub fn resolve_type_ref_in_scope(&self, tref: &TypeRef, scope: &[String]) -> Option<Type> {
+        match tref {
+            TypeRef::Simple(name) => {
+                if scope.iter().any(|p| p == name) {
+                    Some(Type::Param(name.clone()))
+                } else {
+                    self.resolve_name(name)
+                }
+            }
+            TypeRef::Generic(name, args) => {
+                let resolved_args: Vec<Type> = args
+                    .iter()
+                    .map(|a| {
+                        self.resolve_type_ref_in_scope(a, scope)
+                            .unwrap_or(Type::Error)
+                    })
+                    .collect();
+                if let Some(info) = self.types.get(name) {
+                    if info.generic_params.len() == args.len() {
+                        return Some(Type::Generic(name.clone(), resolved_args));
+                    }
+                }
+                None
+            }
+        }
+    }
+
     /// Conformance (A.8.4): is `a <= b`?
     ///
     /// Rules from the spec, in order of application:
@@ -152,7 +254,9 @@ impl TypeCtx {
     /// 2. Reflexive: every type conforms to itself.
     /// 3. `Object` is the top of the hierarchy.
     /// 4. `Number`, `String`, `Boolean` conform only to themselves and to `Object`.
-    /// 5. Otherwise: walk the parent chain of `a`; if it reaches `b`, conform.
+    /// 5. Generic types conform invariantly: `T[A]` ≤ `T[B]` iff `A == B`.
+    /// 6. Type parameters (`Param`) conform only to themselves and `Object`.
+    /// 7. Otherwise: walk the parent chain of `a`; if it reaches `b`, conform.
     pub fn conforms(&self, a: &Type, b: &Type) -> bool {
         if matches!(a, Type::Error) || matches!(b, Type::Error) {
             return true;
@@ -165,20 +269,29 @@ impl TypeCtx {
         }
         if matches!(
             a,
-            Type::Number | Type::String | Type::Boolean | Type::Object
+            Type::Number | Type::String | Type::Boolean | Type::Object | Type::Param(_)
         ) {
             return false;
         }
-        let mut cur = match a {
-            Type::User(n) => n.clone(),
+        // Generic invariance: only equal heads + equal args conform (handled by `a == b` above).
+        // Different heads or different args: walk parent chain of `a`'s base.
+        let cur_base = match a {
+            Type::User(n) | Type::Generic(n, _) => n.clone(),
             _ => return false,
         };
-        let target = match b {
-            Type::User(n) => n.clone(),
+        // Target base name (only `User` / `Generic` accepted as targets here).
+        let target_base = match b {
+            Type::User(n) | Type::Generic(n, _) => n.clone(),
             _ => return false,
         };
+        let mut cur = cur_base;
         while let Some(info) = self.types.get(&cur) {
-            if info.parent == target {
+            if info.parent == target_base {
+                // For generic targets we still require structural equality (already handled).
+                // For non-generic targets (`Type::User`), parent-chain reach is enough.
+                if let Type::Generic(_, _) = b {
+                    return false;
+                }
                 return true;
             }
             if info.parent == "Object" {
@@ -227,14 +340,29 @@ impl TypeCtx {
     fn parent_of(&self, t: &Type) -> Option<Type> {
         match t {
             Type::Number | Type::String | Type::Boolean => Some(Type::Object),
-            Type::Object | Type::Error => None,
-            Type::User(name) => {
+            Type::Object | Type::Error | Type::Param(_) => None,
+            Type::User(name) | Type::Generic(name, _) => {
                 let info = self.types.get(name)?;
                 Some(match info.parent.as_str() {
                     "Object" => Type::Object,
                     other => Type::User(other.to_string()),
                 })
             }
+        }
+    }
+
+    /// Substitute type parameters in `ty` according to `subst` (param name → type).
+    ///
+    /// Used at generic method/field lookup time: when `self : List[Number]`
+    /// and `head` is declared `T`, the lookup substitutes `T → Number`.
+    pub fn substitute(&self, ty: &Type, subst: &HashMap<String, Type>) -> Type {
+        match ty {
+            Type::Param(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+            Type::Generic(name, args) => Type::Generic(
+                name.clone(),
+                args.iter().map(|a| self.substitute(a, subst)).collect(),
+            ),
+            _ => ty.clone(),
         }
     }
 }

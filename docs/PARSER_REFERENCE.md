@@ -6,7 +6,7 @@
 - `crates/hulk-parser/src/lib.rs`
 - `crates/hulk-parser/src/grammar.lalrpop`
 **Generador:** [LALRpop](https://github.com/lalrpop/lalrpop) v0.23
-**Ultima actualizacion:** 2026-05-21
+**Ultima actualizacion:** 2026-06-10 (extension: generics con `[T]`)
 
 > Este archivo es la fuente de verdad sobre el parser y el AST. Cualquier cambio en `hulk-parser` o `hulk-ast` **DEBE** reflejarse aqui en el mismo commit.
 
@@ -385,3 +385,91 @@ Todos los nodos del AST llevan `Span`. El parser los construye usando `@L` (left
 | `parses_type_declaration` | `type` con atributos y metodos |
 | `parses_type_with_inheritance` | `type X inherits Y(...)` |
 | `parses_complete_program` | Programa con multiples funciones y tipos |
+
+---
+
+## Extension: Generics (parametros de tipo)
+
+A partir de 2026-06-10 el parser soporta parametros de tipo con sintaxis de **corchetes** `[T, U]`. Se eligio `[]` en lugar de `<>` para evitar el conflicto LALR con los operadores `<` y `>`.
+
+### Tokens nuevos
+
+| Token | Simbolo | Uso |
+|-------|---------|-----|
+| `LBracket` | `[` | Apertura de lista de parametros/argumentos de tipo |
+| `RBracket` | `]` | Cierre de lista de parametros/argumentos de tipo |
+
+### TypeRef — referencia a un tipo
+
+Antes, las anotaciones de tipo se representaban como `Option<String>`. Ahora son `Option<TypeRef>`:
+
+```rust
+pub enum TypeRef {
+    Simple(String),                    // Number, Point, T
+    Generic(String, Vec<TypeRef>),     // List[Number], Map[String, List[Number]]
+}
+```
+
+Disponible en: `Param.ty`, `AttrDecl.ty`, `FunctionDecl.return_ty`, `MethodDecl.return_ty`, `ExprKind::Let`, `ExprKind::Is`, `ExprKind::As`.
+
+### Sintaxis
+
+```hulk
+// Declaracion de tipo generico
+type Box[T](item: T) {
+    item: T = item;
+    get(): T => self.item;
+}
+
+// Multiples parametros
+type Pair[A, B](a: A, b: B) { ... }
+
+// Funcion generica
+function id[T](x: T): T => x;
+
+// Instanciacion
+new Box[Number](42)
+new Pair[String, Number]("life", 42)
+
+// Anotacion en let
+let xs: List[Number] = ... in ...
+
+// Test/cast de tipo
+x is List[Number]
+x as Map[String, Point]
+```
+
+### Nuevas reglas en grammar.lalrpop
+
+| Regla | Tipo de retorno | Descripcion |
+|-------|----------------|-------------|
+| `TypeRef` | `TypeRef` | Tipo simple o generico (recursivo) |
+| `GenericParams` | `Vec<String>` | Lista de parametros en una declaracion: `[T, U]` |
+| `GenericArgs` | `Vec<TypeRef>` | Lista de argumentos en uso: `[Number, String]` |
+
+### Cambios en nodos del AST
+
+| Nodo | Campo nuevo / modificado |
+|------|--------------------------|
+| `TypeDecl` | `+ generic_params: Vec<String>` |
+| `FunctionDecl` | `+ generic_params: Vec<String>`; `return_ty: Option<TypeRef>` |
+| `MethodDecl` | `return_ty: Option<TypeRef>` |
+| `Param` | `ty: Option<TypeRef>` |
+| `AttrDecl` | `ty: Option<TypeRef>` |
+| `ExprKind::New` | Ahora `New(String, Vec<TypeRef>, Vec<Expr>)` — args de tipo + args del ctor |
+| `ExprKind::Let` | Segundo campo: `Option<TypeRef>` |
+| `ExprKind::Is` | Segundo campo: `TypeRef` |
+| `ExprKind::As` | Segundo campo: `TypeRef` |
+
+### Backwards compatibility
+
+- `type Point(x, y) { ... }` sigue parseando: `generic_params` queda vacio.
+- `function f(x): Number` no requiere cambios.
+- `new Point(1, 2)` sigue funcionando con `Vec<TypeRef>` vacio.
+- `x is Number` sigue funcionando con `TypeRef::Simple("Number")`.
+
+### Type erasure en runtime
+
+Los argumentos genericos se **borran** durante el lowering a IR: `new List[Number](42)` se compila identicamente a `new List(42)` — la VM no distingue instancias por argumentos de tipo. La invariancia entre `List[Number]` y `List[String]` se enforza solo en el type checker (`hulk-semantic`).
+
+Ver [docs/EXTENSIONS.md](EXTENSIONS.md) para mas detalle y comparativas.

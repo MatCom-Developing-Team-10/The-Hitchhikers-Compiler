@@ -24,6 +24,9 @@ pub struct Checker {
     pub ctx: TypeCtx,
     pub errors: Vec<SemError>,
     current_method: Option<MethodScope>,
+    /// Generic type parameters in scope for the current declaration body
+    /// (e.g., `T` inside `function map[T,U](...)` or inside methods of `List[T]`).
+    current_generic_scope: Vec<String>,
 }
 
 impl Default for Checker {
@@ -38,6 +41,7 @@ impl Checker {
             ctx: TypeCtx::new(),
             errors: Vec::new(),
             current_method: None,
+            current_generic_scope: Vec::new(),
         }
     }
 
@@ -77,6 +81,7 @@ impl Checker {
                 td.name.clone(),
                 TypeInfo {
                     parent,
+                    generic_params: td.generic_params.clone(),
                     ctor_params: Vec::new(),
                     parent_args: td.parent.as_ref().and_then(|p| p.args.clone()),
                     attrs: HashMap::new(),
@@ -141,6 +146,7 @@ impl Checker {
                 FunctionSig {
                     params: vec![Type::Object; f.params.len()],
                     returns: Type::Object,
+                    generic_params: f.generic_params.clone(),
                 },
             );
         }
@@ -174,18 +180,24 @@ impl Checker {
                     });
                 }
             }
+            let scope = f.generic_params.clone();
             let params = f
                 .params
                 .iter()
-                .map(|p| self.resolve_or_default(p.ty.as_deref(), p.span))
+                .map(|p| self.resolve_or_default(p.ty.as_ref(), &scope, p.span))
                 .collect();
             let returns = match &f.return_ty {
-                Some(n) => self.resolve_or_default(Some(n), f.span),
+                Some(tref) => self.resolve_or_default(Some(tref), &scope, f.span),
                 None => Type::Object,
             };
-            self.ctx
-                .funcs
-                .insert(f.name.clone(), FunctionSig { params, returns });
+            self.ctx.funcs.insert(
+                f.name.clone(),
+                FunctionSig {
+                    params,
+                    returns,
+                    generic_params: f.generic_params.clone(),
+                },
+            );
         }
         for td in &prog.types {
             for p in &td.type_params {
@@ -196,25 +208,28 @@ impl Checker {
                     });
                 }
             }
+            let scope = td.generic_params.clone();
             let ctor_params: Vec<(String, Type)> = td
                 .type_params
                 .iter()
                 .map(|p| {
                     (
                         p.name.clone(),
-                        self.resolve_or_default(p.ty.as_deref(), p.span),
+                        self.resolve_or_default(p.ty.as_ref(), &scope, p.span),
                     )
                 })
                 .collect();
             let mut attrs = HashMap::new();
             for a in &td.attributes {
                 let attr_type = if a.ty.is_some() {
-                    self.resolve_or_default(a.ty.as_deref(), a.span)
+                    self.resolve_or_default(a.ty.as_ref(), &scope, a.span)
                 } else {
                     // No explicit annotation: infer from the initializer expression
                     // using ctor params as scope. Errors are suppressed here because
                     // check_bodies will report them with full context.
-                    let saved = self.errors.len();
+                    let saved_errors = self.errors.len();
+                    let saved_scope =
+                        std::mem::replace(&mut self.current_generic_scope, scope.clone());
                     let mut env = Env::new();
                     for (pname, pty) in &ctor_params {
                         env.define(
@@ -226,7 +241,8 @@ impl Checker {
                         );
                     }
                     let inferred = self.check_expr(&mut env, &a.init);
-                    self.errors.truncate(saved);
+                    self.errors.truncate(saved_errors);
+                    self.current_generic_scope = saved_scope;
                     if inferred == Type::Error {
                         Type::Object
                     } else {
@@ -248,10 +264,10 @@ impl Checker {
                 let params = m
                     .params
                     .iter()
-                    .map(|p| self.resolve_or_default(p.ty.as_deref(), p.span))
+                    .map(|p| self.resolve_or_default(p.ty.as_ref(), &scope, p.span))
                     .collect();
                 let returns = match &m.return_ty {
-                    Some(n) => self.resolve_or_default(Some(n), m.span),
+                    Some(tref) => self.resolve_or_default(Some(tref), &scope, m.span),
                     None => Type::Object,
                 };
                 methods.insert(
@@ -271,13 +287,13 @@ impl Checker {
         }
     }
 
-    fn resolve_or_default(&mut self, name: Option<&str>, span: Span) -> Type {
-        match name {
-            Some(n) => match self.ctx.resolve_name(n) {
-                Some(t) => t,
+    fn resolve_or_default(&mut self, tref: Option<&TypeRef>, scope: &[String], span: Span) -> Type {
+        match tref {
+            Some(t) => match self.ctx.resolve_type_ref_in_scope(t, scope) {
+                Some(ty) => ty,
                 None => {
                     self.errors.push(SemError::UndefinedType {
-                        name: n.into(),
+                        name: t.to_string(),
                         span,
                     });
                     Type::Object
@@ -365,6 +381,7 @@ impl Checker {
             let mut env = Env::new();
             let sig = self.ctx.funcs.get(&f.name).cloned();
             if let Some(sig) = sig {
+                self.current_generic_scope = f.generic_params.clone();
                 for (p, pt) in f.params.iter().zip(sig.params.iter()) {
                     env.define(
                         &p.name,
@@ -378,12 +395,14 @@ impl Checker {
                 if f.return_ty.is_some() {
                     self.require(&body_ty, &sig.returns, f.body.span);
                 }
+                self.current_generic_scope.clear();
             }
         }
 
         for td in &prog.types {
             let info = self.ctx.types.get(&td.name).cloned();
             if let Some(info) = info {
+                self.current_generic_scope = td.generic_params.clone();
                 // Validate explicit parent constructor arguments in `inherits Parent(a, b, ...)`.
                 // These expressions can reference this type's constructor parameters, but not `self`.
                 if let Some(parent_spec) = td.parent.as_ref() {
@@ -421,16 +440,30 @@ impl Checker {
                         );
                     }
                     let init_ty = self.check_expr(&mut env, &a.init);
-                    if let Some(declared) = a.ty.as_ref().and_then(|n| self.ctx.resolve_name(n)) {
+                    if let Some(declared) =
+                        a.ty.as_ref()
+                            .and_then(|t| self.ctx.resolve_type_ref_in_scope(t, &td.generic_params))
+                    {
                         self.require(&init_ty, &declared, a.init.span);
                     }
                 }
+                let self_ty = if td.generic_params.is_empty() {
+                    Type::User(td.name.clone())
+                } else {
+                    Type::Generic(
+                        td.name.clone(),
+                        td.generic_params
+                            .iter()
+                            .map(|p| Type::Param(p.clone()))
+                            .collect(),
+                    )
+                };
                 for m in &td.methods {
                     let mut env = Env::new();
                     env.define(
                         "self",
                         Binding {
-                            ty: Type::User(td.name.clone()),
+                            ty: self_ty.clone(),
                             span: m.span,
                         },
                     );
@@ -456,6 +489,7 @@ impl Checker {
                         }
                     }
                 }
+                self.current_generic_scope.clear();
             }
         }
 
@@ -537,19 +571,41 @@ impl Checker {
             ExprKind::MethodCall(recv, name, args) => {
                 let rt = self.check_expr(env, recv);
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(env, a)).collect();
-                let sig = match &rt {
-                    Type::User(tn) => self.lookup_inherited_method(tn, name),
-                    _ => None,
+                let (sig, subst) = match &rt {
+                    Type::User(tn) => (self.lookup_inherited_method(tn, name), HashMap::new()),
+                    Type::Generic(tn, targs) => {
+                        let sig = self.lookup_inherited_method(tn, name);
+                        let subst = self
+                            .ctx
+                            .types
+                            .get(tn)
+                            .map(|info| {
+                                info.generic_params
+                                    .iter()
+                                    .cloned()
+                                    .zip(targs.iter().cloned())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        (sig, subst)
+                    }
+                    _ => (None, HashMap::new()),
                 };
                 match sig {
                     Some(sig) => {
-                        self.check_args(&sig.params, &arg_tys, args, e.span);
-                        sig.returns
+                        let params: Vec<Type> = sig
+                            .params
+                            .iter()
+                            .map(|p| self.ctx.substitute(p, &subst))
+                            .collect();
+                        let returns = self.ctx.substitute(&sig.returns, &subst);
+                        self.check_args(&params, &arg_tys, args, e.span);
+                        returns
                     }
                     None => {
                         if !matches!(rt, Type::Error) {
                             self.errors.push(SemError::NoSuchMethod {
-                                ty: rt.name().into(),
+                                ty: rt.name(),
                                 name: name.clone(),
                                 span: e.span,
                             });
@@ -565,25 +621,44 @@ impl Checker {
                 if !is_self {
                     // A.7: attributes are private — accessible only via `self`.
                     self.errors.push(SemError::NoSuchAttribute {
-                        ty: rt.name().into(),
+                        ty: rt.name(),
                         name: name.clone(),
                         span: e.span,
                     });
                     return Type::Error;
                 }
-                match &rt {
-                    Type::User(tn) => match self.lookup_inherited_attr(tn, name) {
-                        Some(t) => t,
+                let (tn_opt, subst) = match &rt {
+                    Type::User(tn) => (Some(tn.clone()), HashMap::new()),
+                    Type::Generic(tn, targs) => {
+                        let subst = self
+                            .ctx
+                            .types
+                            .get(tn)
+                            .map(|info| {
+                                info.generic_params
+                                    .iter()
+                                    .cloned()
+                                    .zip(targs.iter().cloned())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        (Some(tn.clone()), subst)
+                    }
+                    _ => (None, HashMap::new()),
+                };
+                match tn_opt {
+                    Some(tn) => match self.lookup_inherited_attr(&tn, name) {
+                        Some(t) => self.ctx.substitute(&t, &subst),
                         None => {
                             self.errors.push(SemError::NoSuchAttribute {
-                                ty: tn.clone(),
+                                ty: tn,
                                 name: name.clone(),
                                 span: e.span,
                             });
                             Type::Error
                         }
                     },
-                    _ => Type::Error,
+                    None => Type::Error,
                 }
             }
 
@@ -596,14 +671,17 @@ impl Checker {
                 }
                 let vt = self.check_expr(env, value);
                 let bound = match annot {
-                    Some(t) => match self.ctx.resolve_name(t) {
+                    Some(t) => match self
+                        .ctx
+                        .resolve_type_ref_in_scope(t, &self.current_generic_scope)
+                    {
                         Some(at) => {
                             self.require(&vt, &at, value.span);
                             at
                         }
                         None => {
                             self.errors.push(SemError::UndefinedType {
-                                name: t.clone(),
+                                name: t.to_string(),
                                 span: e.span,
                             });
                             vt
@@ -657,17 +735,34 @@ impl Checker {
                 }
                 let rt = self.check_expr(env, recv);
                 let vt = self.check_expr(env, value);
-                let Type::User(tn) = &rt else {
-                    return Type::Error;
+                let (tn, subst) = match &rt {
+                    Type::User(tn) => (tn.clone(), HashMap::new()),
+                    Type::Generic(tn, targs) => {
+                        let subst = self
+                            .ctx
+                            .types
+                            .get(tn)
+                            .map(|info| {
+                                info.generic_params
+                                    .iter()
+                                    .cloned()
+                                    .zip(targs.iter().cloned())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        (tn.clone(), subst)
+                    }
+                    _ => return Type::Error,
                 };
-                match self.lookup_inherited_attr(tn, name) {
+                match self.lookup_inherited_attr(&tn, name) {
                     Some(t) => {
-                        self.require(&vt, &t, value.span);
-                        t
+                        let resolved = self.ctx.substitute(&t, &subst);
+                        self.require(&vt, &resolved, value.span);
+                        resolved
                     }
                     None => {
                         self.errors.push(SemError::NoSuchAttribute {
-                            ty: tn.clone(),
+                            ty: tn,
                             name: name.clone(),
                             span: e.span,
                         });
@@ -722,38 +817,85 @@ impl Checker {
                 last
             }
 
-            ExprKind::New(tname, args) => {
+            ExprKind::New(tname, type_args, args) => {
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(env, a)).collect();
-                if !self.ctx.types.contains_key(tname) {
+                let Some(info) = self.ctx.types.get(tname).cloned() else {
                     self.errors.push(SemError::UndefinedType {
                         name: tname.clone(),
                         span: e.span,
                     });
                     return Type::Error;
+                };
+                // Validate generic arity against the type declaration.
+                if info.generic_params.len() != type_args.len()
+                    && (!type_args.is_empty() || !info.generic_params.is_empty())
+                {
+                    self.errors.push(SemError::Arity {
+                        expected: info.generic_params.len(),
+                        found: type_args.len(),
+                        span: e.span,
+                    });
+                    return Type::Error;
                 }
-                let expected = self.effective_ctor_params(tname);
+                // Resolve generic arguments and build substitution.
+                let resolved_args: Vec<Type> = type_args
+                    .iter()
+                    .map(|t| {
+                        self.ctx
+                            .resolve_type_ref_in_scope(t, &self.current_generic_scope)
+                            .unwrap_or_else(|| {
+                                self.errors.push(SemError::UndefinedType {
+                                    name: t.to_string(),
+                                    span: e.span,
+                                });
+                                Type::Error
+                            })
+                    })
+                    .collect();
+                let subst: HashMap<String, Type> = info
+                    .generic_params
+                    .iter()
+                    .cloned()
+                    .zip(resolved_args.iter().cloned())
+                    .collect();
+                let expected: Vec<Type> = self
+                    .effective_ctor_params(tname)
+                    .iter()
+                    .map(|t| self.ctx.substitute(t, &subst))
+                    .collect();
                 self.check_args(&expected, &arg_tys, args, e.span);
-                Type::User(tname.clone())
+                if info.generic_params.is_empty() {
+                    Type::User(tname.clone())
+                } else {
+                    Type::Generic(tname.clone(), resolved_args)
+                }
             }
 
-            ExprKind::Is(expr, _ty) => {
+            ExprKind::Is(expr, tref) => {
                 let _ = self.check_expr(env, expr);
-                if self.ctx.resolve_name(_ty).is_none() {
+                if self
+                    .ctx
+                    .resolve_type_ref_in_scope(tref, &self.current_generic_scope)
+                    .is_none()
+                {
                     self.errors.push(SemError::UndefinedType {
-                        name: _ty.clone(),
+                        name: tref.to_string(),
                         span: e.span,
                     });
                 }
                 Type::Boolean
             }
 
-            ExprKind::As(expr, tname) => {
+            ExprKind::As(expr, tref) => {
                 let _ = self.check_expr(env, expr);
-                match self.ctx.resolve_name(tname) {
+                match self
+                    .ctx
+                    .resolve_type_ref_in_scope(tref, &self.current_generic_scope)
+                {
                     Some(t) => t,
                     None => {
                         self.errors.push(SemError::UndefinedType {
-                            name: tname.clone(),
+                            name: tref.to_string(),
                             span: e.span,
                         });
                         Type::Error
@@ -829,7 +971,7 @@ impl Checker {
         }
         self.errors.push(SemError::Mismatch {
             expected: "String or Number".into(),
-            found: found.name().into(),
+            found: found.name(),
             span,
         });
     }
@@ -851,8 +993,8 @@ impl Checker {
     fn require(&mut self, found: &Type, expected: &Type, span: Span) {
         if !self.ctx.conforms(found, expected) {
             self.errors.push(SemError::Mismatch {
-                expected: expected.name().into(),
-                found: found.name().into(),
+                expected: expected.name(),
+                found: found.name(),
                 span,
             });
         }

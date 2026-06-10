@@ -1,0 +1,12 @@
+// Generics extension demo: a generic Box[T] that stores a single value.
+//
+// Type erasure means the runtime treats Box[Number] and Box[String] as the
+// same `Box` object; the type system enforces consistency at compile time.
+
+type Box[T](item: T) {
+    item: T = item;
+    get(): T => self.item;
+    set(v: T): T => self.item := v;
+}
+
+let n: Number = (new Box[Number](42)).get() in print(n);

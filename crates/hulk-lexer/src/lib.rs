@@ -156,6 +156,12 @@ pub enum Token {
     /// `:` colon for type annotations.
     #[token(":")]
     Colon,
+    /// `[` left bracket for generic type parameters (e.g., `List[T]`).
+    #[token("[")]
+    LBracket,
+    /// `]` right bracket for generic type parameters.
+    #[token("]")]
+    RBracket,
 
     // ---- Literals ----
     /// Numeric literal (integer or floating-point).
@@ -220,6 +226,8 @@ impl fmt::Display for Token {
             Token::Comma => write!(f, ","),
             Token::Dot => write!(f, "."),
             Token::Colon => write!(f, ":"),
+            Token::LBracket => write!(f, "["),
+            Token::RBracket => write!(f, "]"),
             Token::Number => write!(f, "<number>"),
             Token::StringLit => write!(f, "<string>"),
             Token::Ident => write!(f, "<identifier>"),
@@ -390,7 +398,7 @@ mod tests {
 
     #[test]
     fn punctuation_tokenizes_correctly() {
-        let input = "( ) { } ; , . :";
+        let input = "( ) { } [ ] ; , . :";
         let tokens = lex(input);
         assert_eq!(
             tokens,
@@ -399,6 +407,8 @@ mod tests {
                 Token::RParen,
                 Token::LBrace,
                 Token::RBrace,
+                Token::LBracket,
+                Token::RBracket,
                 Token::Semi,
                 Token::Comma,
                 Token::Dot,

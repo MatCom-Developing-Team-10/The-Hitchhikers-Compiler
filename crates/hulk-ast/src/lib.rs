@@ -67,15 +67,71 @@ pub struct Program {
     pub entry: Expr,
 }
 
+/// A reference to a type, possibly parameterized by generic arguments.
+///
+/// Extension (generics): the parser produces this in every position that
+/// previously accepted just a type name (`Option<String>`). Examples:
+/// - `Number` → `TypeRef::Simple("Number")`
+/// - `List[Number]` → `TypeRef::Generic("List", [Simple("Number")])`
+/// - `Map[String, List[Number]]` → nested.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeRef {
+    /// A non-parameterized type reference (e.g., `Number`, `Point`).
+    Simple(String),
+    /// A generic type reference (e.g., `List[T]`, `Map[K, V]`).
+    Generic(String, Vec<TypeRef>),
+}
+
+impl TypeRef {
+    /// Returns the base type name (without generic arguments).
+    pub fn base_name(&self) -> &str {
+        match self {
+            TypeRef::Simple(n) | TypeRef::Generic(n, _) => n,
+        }
+    }
+}
+
+impl From<&str> for TypeRef {
+    fn from(s: &str) -> Self {
+        TypeRef::Simple(s.to_string())
+    }
+}
+
+impl From<String> for TypeRef {
+    fn from(s: String) -> Self {
+        TypeRef::Simple(s)
+    }
+}
+
+impl fmt::Display for TypeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeRef::Simple(n) => write!(f, "{n}"),
+            TypeRef::Generic(n, args) => {
+                write!(f, "{n}[")?;
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{a}")?;
+                }
+                write!(f, "]")
+            }
+        }
+    }
+}
+
 /// A global function declaration (A.3).
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
     /// Function name.
     pub name: String,
+    /// Generic type parameters (extension). Empty for non-generic functions.
+    pub generic_params: Vec<String>,
     /// Parameter list.
     pub params: Vec<Param>,
     /// Optional return type annotation.
-    pub return_ty: Option<String>,
+    pub return_ty: Option<TypeRef>,
     /// Function body expression.
     pub body: Expr,
     /// Source span covering the entire declaration.
@@ -87,8 +143,8 @@ pub struct FunctionDecl {
 pub struct Param {
     /// Parameter name.
     pub name: String,
-    /// Optional type annotation (e.g., `x: Number`).
-    pub ty: Option<String>,
+    /// Optional type annotation (e.g., `x: Number`, `xs: List[T]`).
+    pub ty: Option<TypeRef>,
     /// Source span.
     pub span: Span,
 }
@@ -98,6 +154,8 @@ pub struct Param {
 pub struct TypeDecl {
     /// Type name.
     pub name: String,
+    /// Generic type parameters (extension). Empty for non-generic types.
+    pub generic_params: Vec<String>,
     /// Constructor parameters (may be empty).
     pub type_params: Vec<Param>,
     /// Optional parent type for inheritance.
@@ -128,7 +186,7 @@ pub struct AttrDecl {
     /// Attribute name.
     pub name: String,
     /// Optional type annotation.
-    pub ty: Option<String>,
+    pub ty: Option<TypeRef>,
     /// Initialization expression (sees only constructor params, not `self`).
     pub init: Expr,
     /// Source span.
@@ -143,7 +201,7 @@ pub struct MethodDecl {
     /// Parameter list (does not include `self`).
     pub params: Vec<Param>,
     /// Optional return type annotation.
-    pub return_ty: Option<String>,
+    pub return_ty: Option<TypeRef>,
     /// Method body expression.
     pub body: Expr,
     /// Source span.
@@ -198,7 +256,7 @@ pub enum ExprKind {
 
     // -- Bindings (A.4) — `Let` is unary; multi-binding desugared by parser --
     /// `let name [: Type] = init in body`.
-    Let(String, Option<String>, Box<Expr>, Box<Expr>),
+    Let(String, Option<TypeRef>, Box<Expr>, Box<Expr>),
     /// Destructive assignment: `name := value` (A.4.6).
     Assign(String, Box<Expr>),
     /// Field assignment: `self.field := value`.
@@ -216,14 +274,17 @@ pub enum ExprKind {
     Block(Vec<Expr>),
 
     // -- OOP --
-    /// Object instantiation: `new TypeName(args)` (A.7.2).
-    New(String, Vec<Expr>),
+    /// Object instantiation: `new TypeName[T1, T2](args)` (A.7.2 + generics).
+    ///
+    /// Fields: type name, generic type arguments (empty for non-generic types),
+    /// constructor arguments.
+    New(String, Vec<TypeRef>, Vec<Expr>),
 
     // -- Type operations (A.8.5, A.8.6) --
     /// Runtime type test: `expr is TypeName`.
-    Is(Box<Expr>, String),
+    Is(Box<Expr>, TypeRef),
     /// Downcast: `expr as TypeName`.
-    As(Box<Expr>, String),
+    As(Box<Expr>, TypeRef),
 }
 
 /// Binary operators (A.2.1, A.2.2, A.5).

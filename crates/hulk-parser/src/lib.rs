@@ -137,7 +137,7 @@ mod tests {
     fn parses_let_with_type_annotation() {
         let prog = parse("let x: Number = 42 in x;").unwrap();
         if let ExprKind::Let(_, ty, _, _) = &prog.entry.kind {
-            assert_eq!(ty.as_deref(), Some("Number"));
+            assert_eq!(ty.as_ref(), Some(&TypeRef::Simple("Number".to_string())));
         } else {
             panic!("expected Let");
         }
@@ -199,8 +199,9 @@ mod tests {
     #[test]
     fn parses_new_expression() {
         let prog = parse("new Point(1, 2);").unwrap();
-        if let ExprKind::New(name, args) = &prog.entry.kind {
+        if let ExprKind::New(name, generics, args) = &prog.entry.kind {
             assert_eq!(name, "Point");
+            assert!(generics.is_empty());
             assert_eq!(args.len(), 2);
         } else {
             panic!("expected New");
@@ -258,13 +259,19 @@ mod tests {
     #[test]
     fn parses_is_expression() {
         let prog = parse("x is Number;").unwrap();
-        assert!(matches!(&prog.entry.kind, ExprKind::Is(_, ty) if ty == "Number"));
+        assert!(matches!(
+            &prog.entry.kind,
+            ExprKind::Is(_, TypeRef::Simple(ty)) if ty == "Number"
+        ));
     }
 
     #[test]
     fn parses_as_expression() {
         let prog = parse("x as Number;").unwrap();
-        assert!(matches!(&prog.entry.kind, ExprKind::As(_, ty) if ty == "Number"));
+        assert!(matches!(
+            &prog.entry.kind,
+            ExprKind::As(_, TypeRef::Simple(ty)) if ty == "Number"
+        ));
     }
 
     #[test]

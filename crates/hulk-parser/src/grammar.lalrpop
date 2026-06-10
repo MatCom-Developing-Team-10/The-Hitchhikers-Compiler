@@ -63,6 +63,8 @@ extern {
         "," => Token::Comma,
         "." => Token::Dot,
         ":" => Token::Colon,
+        "[" => Token::LBracket,
+        "]" => Token::RBracket,
 
         // Literals & Ident
         NumLit    => Token::Number,
@@ -89,8 +91,22 @@ Comma1<T>: Vec<T> = {
 // Extract the source slice for an identifier token.
 IdentStr: &'input str = <lo:@L> IdentTok <hi:@R> => &input[lo..hi];
 
-// Type annotation: just a type name for now.
-TypeAnnotation: String = <name:IdentStr> => name.to_string();
+// Type reference: either a simple name or a parameterized type (extension).
+// Examples: `Number`, `List[T]`, `Map[String, List[Number]]`.
+TypeRef: TypeRef = {
+    <name:IdentStr> "[" <args:Comma1<TypeRef>> "]" => TypeRef::Generic(name.to_string(), args),
+    <name:IdentStr> => TypeRef::Simple(name.to_string()),
+};
+
+// Generic parameter list (declaration): `[T]`, `[T, U]`.
+GenericParams: Vec<String> = {
+    "[" <params:Comma1<IdentStr>> "]" => params.into_iter().map(|s| s.to_string()).collect(),
+};
+
+// Generic argument list (use site): `[Number]`, `[String, Point]`.
+GenericArgs: Vec<TypeRef> = {
+    "[" <args:Comma1<TypeRef>> "]" => args,
+};
 
 // =====================================================================
 // Top-level: Program
@@ -107,12 +123,14 @@ pub Program: Program = {
 // =====================================================================
 
 TypeDecl: TypeDecl = {
-    // type Name(params) [inherits Parent(args)] { body }
-    <lo:@L> "type" <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
+    // type Name[T,U](params) [inherits Parent(args)] { body }
+    <lo:@L> "type" <name:IdentStr> <gp:GenericParams?>
+        "(" <params:Comma<TypeParam>> ")"
         <parent:InheritsClause?>
         "{" <body:TypeBody> "}" <hi:@R> => {
         TypeDecl {
             name: name.to_string(),
+            generic_params: gp.unwrap_or_default(),
             type_params: params,
             parent,
             attributes: body.0,
@@ -120,12 +138,13 @@ TypeDecl: TypeDecl = {
             span: Span::new(lo, hi),
         }
     },
-    // type Name [inherits Parent(args)] { body }  (no constructor params)
-    <lo:@L> "type" <name:IdentStr>
+    // type Name[T,U] [inherits Parent(args)] { body }  (no constructor params)
+    <lo:@L> "type" <name:IdentStr> <gp:GenericParams?>
         <parent:InheritsClause?>
         "{" <body:TypeBody> "}" <hi:@R> => {
         TypeDecl {
             name: name.to_string(),
+            generic_params: gp.unwrap_or_default(),
             type_params: vec![],
             parent,
             attributes: body.0,
@@ -136,7 +155,7 @@ TypeDecl: TypeDecl = {
 };
 
 TypeParam: Param = {
-    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> <hi:@R> => {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeRef>)?> <hi:@R> => {
         Param { name: name.to_string(), ty, span: Span::new(lo, hi) }
     },
 };
@@ -170,7 +189,7 @@ TypeMember: TypeMemberKind = {
 };
 
 AttrDecl: AttrDecl = {
-    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> "=" <init:Expr> ";" <hi:@R> => {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeRef>)?> "=" <init:Expr> ";" <hi:@R> => {
         AttrDecl {
             name: name.to_string(),
             ty,
@@ -183,7 +202,7 @@ AttrDecl: AttrDecl = {
 MethodDecl: MethodDecl = {
     // Inline: name(params)[: RetTy] => expr;
     <lo:@L> <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
-        <ret:(":" <TypeAnnotation>)?> "=>" <body:Expr> ";" <hi:@R> => {
+        <ret:(":" <TypeRef>)?> "=>" <body:Expr> ";" <hi:@R> => {
         MethodDecl {
             name: name.to_string(),
             params,
@@ -194,7 +213,7 @@ MethodDecl: MethodDecl = {
     },
     // Block: name(params)[: RetTy] { body }
     <lo:@L> <name:IdentStr> "(" <params:Comma<TypeParam>> ")"
-        <ret:(":" <TypeAnnotation>)?> <body:BlockExpr> <hi:@R> => {
+        <ret:(":" <TypeRef>)?> <body:BlockExpr> <hi:@R> => {
         MethodDecl {
             name: name.to_string(),
             params,
@@ -210,22 +229,26 @@ MethodDecl: MethodDecl = {
 // =====================================================================
 
 FunctionDecl: FunctionDecl = {
-    // Inline: function name(params)[: RetTy] => expr;
-    <lo:@L> "function" <name:IdentStr> "(" <params:Comma<FuncParam>> ")"
-        <ret:(":" <TypeAnnotation>)?> "=>" <body:Expr> ";" <hi:@R> => {
+    // Inline: function name[T,U](params)[: RetTy] => expr;
+    <lo:@L> "function" <name:IdentStr> <gp:GenericParams?>
+        "(" <params:Comma<FuncParam>> ")"
+        <ret:(":" <TypeRef>)?> "=>" <body:Expr> ";" <hi:@R> => {
         FunctionDecl {
             name: name.to_string(),
+            generic_params: gp.unwrap_or_default(),
             params,
             return_ty: ret,
             body,
             span: Span::new(lo, hi),
         }
     },
-    // Block: function name(params)[: RetTy] { body }
-    <lo:@L> "function" <name:IdentStr> "(" <params:Comma<FuncParam>> ")"
-        <ret:(":" <TypeAnnotation>)?> <body:BlockExpr> <hi:@R> => {
+    // Block: function name[T,U](params)[: RetTy] { body }
+    <lo:@L> "function" <name:IdentStr> <gp:GenericParams?>
+        "(" <params:Comma<FuncParam>> ")"
+        <ret:(":" <TypeRef>)?> <body:BlockExpr> <hi:@R> => {
         FunctionDecl {
             name: name.to_string(),
+            generic_params: gp.unwrap_or_default(),
             params,
             return_ty: ret,
             body,
@@ -235,7 +258,7 @@ FunctionDecl: FunctionDecl = {
 };
 
 FuncParam: Param = {
-    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> <hi:@R> => {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeRef>)?> <hi:@R> => {
         Param { name: name.to_string(), ty, span: Span::new(lo, hi) }
     },
 };
@@ -274,8 +297,8 @@ LetExpr: Expr = {
     },
 };
 
-LetBinding: (String, Option<String>, Expr, Span) = {
-    <lo:@L> <name:IdentStr> <ty:(":" <TypeAnnotation>)?> "=" <init:ControlOrBinary> <hi:@R> => {
+LetBinding: (String, Option<TypeRef>, Expr, Span) = {
+    <lo:@L> <name:IdentStr> <ty:(":" <TypeRef>)?> "=" <init:ControlOrBinary> <hi:@R> => {
         (name.to_string(), ty, init, Span::new(lo, hi))
     },
 };
@@ -356,11 +379,11 @@ CompareExpr: Expr = {
 
 // Level 5: type operations (is, as)
 TypeOpExpr: Expr = {
-    <lo:@L> <e:ConcatExpr> "is" <ty:IdentStr> <hi:@R> => {
-        Expr { span: Span::new(lo, hi), kind: ExprKind::Is(Box::new(e), ty.to_string()) }
+    <lo:@L> <e:ConcatExpr> "is" <ty:TypeRef> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::Is(Box::new(e), ty) }
     },
-    <lo:@L> <e:ConcatExpr> "as" <ty:IdentStr> <hi:@R> => {
-        Expr { span: Span::new(lo, hi), kind: ExprKind::As(Box::new(e), ty.to_string()) }
+    <lo:@L> <e:ConcatExpr> "as" <ty:TypeRef> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::As(Box::new(e), ty) }
     },
     ConcatExpr,
 };
@@ -548,12 +571,12 @@ ForExpr: Expr = {
     },
 };
 
-// New expression (A.7.2)
+// New expression (A.7.2 + generics): `new TypeName[T1, T2](args)`.
 NewExpr: Expr = {
-    <lo:@L> "new" <name:IdentStr> "(" <args:Comma<Expr>> ")" <hi:@R> => {
+    <lo:@L> "new" <name:IdentStr> <ga:GenericArgs?> "(" <args:Comma<Expr>> ")" <hi:@R> => {
         Expr {
             span: Span::new(lo, hi),
-            kind: ExprKind::New(name.to_string(), args),
+            kind: ExprKind::New(name.to_string(), ga.unwrap_or_default(), args),
         }
     },
 };
