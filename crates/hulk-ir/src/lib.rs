@@ -2,16 +2,21 @@
 //!
 //! See `ir-v2.spec.md` (v0.2) and `ir-v3.spec.md` (v0.3) for the full
 //! specification of the instruction set and lowering rules.
+//!
+//! **GC extension:** the IR no longer references heap-allocated objects
+//! directly. `Value::Object` now carries an [`ObjectId`] handle; the VM owns
+//! the heap and resolves the handle when fields or methods are accessed.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use hulk_ast::{AttrDecl, BinOp, Expr, ExprKind, FunctionDecl, Program, TypeDecl, UnOp};
 
-// ── Object / ObjectRef ────────────────────────────────────────────────────────
+// ── Object / ObjectId ─────────────────────────────────────────────────────────
 
 /// A heap-allocated HULK object with a runtime type tag and mutable fields.
+///
+/// Stored inside the VM's heap. Code in this crate never holds an `Object`
+/// directly — it deals with [`ObjectId`] handles carried inside [`Value::Object`].
 #[derive(Debug, Clone)]
 pub struct Object {
     /// Runtime type name (e.g. `"Dog"`).
@@ -20,8 +25,13 @@ pub struct Object {
     pub fields: HashMap<String, Value>,
 }
 
-/// Shared, mutable reference to a heap-allocated [`Object`].
-pub type ObjectRef = Rc<RefCell<Object>>;
+/// A handle to a heap-allocated [`Object`]. Resolved by the VM's heap.
+///
+/// Stable for the lifetime of the object — when the GC frees a slot, its id
+/// is recycled and assigned to a new allocation. Two handles compare equal
+/// iff they refer to the same live object.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ObjectId(pub u32);
 
 // ── Value ────────────────────────────────────────────────────────────────────
 
@@ -36,8 +46,8 @@ pub enum Value {
     Str(String),
     /// Nil — result of a void expression (e.g. a while that never executes).
     Nil,
-    /// A reference-counted heap object.
-    Object(ObjectRef),
+    /// A handle into the VM heap (GC-managed).
+    Object(ObjectId),
 }
 
 impl Value {
@@ -53,7 +63,7 @@ impl Value {
     }
 }
 
-/// Pointer equality for objects; structural equality for primitives.
+/// Handle equality for objects; structural equality for primitives.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -61,7 +71,7 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
-            (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
+            (Value::Object(a), Value::Object(b)) => a == b,
             _ => false,
         }
     }
@@ -74,7 +84,9 @@ impl std::fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Str(s) => write!(f, "{s}"),
             Value::Nil => write!(f, "nil"),
-            Value::Object(r) => write!(f, "<{} object>", r.borrow().type_name),
+            // Without access to the heap we render a placeholder; the VM's
+            // `Print` instruction uses a heap-aware formatter.
+            Value::Object(id) => write!(f, "<object #{}>", id.0),
         }
     }
 }

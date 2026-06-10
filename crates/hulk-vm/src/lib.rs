@@ -1,10 +1,14 @@
 //! Stack-based bytecode interpreter for HULK.
 //!
-//! See `vm-v2.spec.md` and `vm-v3.spec.md` for the full specification.
+//! See `vm-v2.spec.md`, `vm-v3.spec.md`, and `vm-v4.spec.md` for the full
+//! specification. v4 introduces an explicit GC heap (see [`heap::Heap`]).
+
+pub mod heap;
 
 use std::collections::HashMap;
 
-use hulk_ir::{Instr, IrFunc, IrProgram, IrTypeInfo, Object, ObjectRef, Value};
+use heap::Heap;
+use hulk_ir::{Instr, IrFunc, IrProgram, IrTypeInfo, Object, ObjectId, Value};
 use thiserror::Error;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -53,6 +57,8 @@ pub struct Vm {
     functions: HashMap<String, IrFunc>,
     /// Type metadata for virtual dispatch and `is`/`as` conformance checks.
     types: HashMap<String, IrTypeInfo>,
+    /// GC-managed heap for all `Value::Object` allocations.
+    pub heap: Heap,
 }
 
 impl Vm {
@@ -63,6 +69,7 @@ impl Vm {
             scopes: Vec::new(),
             functions: HashMap::new(),
             types: HashMap::new(),
+            heap: Heap::new(),
         }
     }
 
@@ -73,8 +80,55 @@ impl Vm {
             scopes: Vec::new(),
             functions: ir.funcs,
             types: ir.types,
+            heap: Heap::new(),
         };
         vm.run(&ir.entry)
+    }
+
+    /// Force a full garbage-collection cycle right now. Useful for tests and
+    /// for the `HULK_GC_THRESHOLD=1` configuration where every allocation
+    /// triggers a sweep.
+    pub fn force_gc(&mut self) -> usize {
+        let roots = self.roots();
+        self.heap.collect(roots)
+    }
+
+    /// Test-only: push a value onto the operand stack.
+    ///
+    /// Exposed for integration tests that exercise the GC root set; the
+    /// regular instruction dispatcher should not need this.
+    pub fn push_root(&mut self, v: Value) {
+        self.stack.push(v);
+    }
+
+    /// Test-only: replace the operand stack contents with `values`.
+    pub fn set_stack_for_testing(&mut self, values: Vec<Value>) {
+        self.stack = values;
+    }
+
+    /// Iterate every `ObjectId` reachable from the VM's stack and scopes.
+    /// Used as the root set for mark-and-sweep.
+    fn roots(&self) -> Vec<ObjectId> {
+        let mut out: Vec<ObjectId> = heap::ids_in_values(self.stack.iter()).into_iter().collect();
+        out.extend(heap::ids_in_scopes(&self.scopes));
+        out
+    }
+
+    /// If the heap signals that a collection is due, run mark-and-sweep.
+    fn maybe_gc(&mut self) {
+        if self.heap.should_collect() {
+            let roots = self.roots();
+            self.heap.collect(roots);
+        }
+    }
+
+    /// Render a `Value` for `print`, resolving object handles through the heap
+    /// to recover the runtime type name.
+    fn format_value(&self, v: &Value) -> String {
+        match v {
+            Value::Object(id) => format!("<{} object>", self.heap.get(*id).type_name),
+            other => format!("{other}"),
+        }
     }
 
     /// Execute a flat instruction sequence.
@@ -269,7 +323,7 @@ impl Vm {
                 // --- I/O ---
                 Instr::Print => {
                     let val = self.pop()?;
-                    println!("{val}");
+                    println!("{}", self.format_value(&val));
                     self.stack.push(val);
                 }
 
@@ -309,22 +363,23 @@ impl Vm {
 
                 // --- OOP ---
 
-                // Create an empty object and push it.
+                // Create an empty object and push it. Allocation may trigger
+                // a GC cycle (see `Heap::should_collect`).
                 Instr::NewObject(type_name) => {
-                    use std::cell::RefCell;
-                    use std::rc::Rc;
-                    let obj = Rc::new(RefCell::new(Object {
+                    let id = self.heap.alloc(Object {
                         type_name: type_name.clone(),
                         fields: HashMap::new(),
-                    }));
-                    self.stack.push(Value::Object(obj));
+                    });
+                    self.stack.push(Value::Object(id));
+                    self.maybe_gc();
                 }
 
                 // Pop object, push field value.
                 Instr::GetField(name) => {
-                    let obj_ref = self.pop_object()?;
-                    let val = obj_ref
-                        .borrow()
+                    let id = self.pop_object()?;
+                    let val = self
+                        .heap
+                        .get(id)
                         .fields
                         .get(name.as_str())
                         .cloned()
@@ -334,10 +389,10 @@ impl Vm {
 
                 // Pop object (top), pop value; set field; push value.
                 Instr::SetField(name) => {
-                    let obj_ref = self.pop_object()?;
+                    let id = self.pop_object()?;
                     let val = self.pop()?;
-                    obj_ref
-                        .borrow_mut()
+                    self.heap
+                        .get_mut(id)
                         .fields
                         .insert(name.clone(), val.clone());
                     self.stack.push(val);
@@ -356,8 +411,8 @@ impl Vm {
 
                     // Pop self.
                     let self_val = self.pop()?;
-                    let obj_ref = match &self_val {
-                        Value::Object(r) => r.clone(),
+                    let obj_id = match &self_val {
+                        Value::Object(id) => *id,
                         Value::Nil => return Err(VmError::NullReference),
                         v => {
                             return Err(VmError::TypeMismatch {
@@ -367,11 +422,11 @@ impl Vm {
                         }
                     };
 
-                    let type_name = obj_ref.borrow().type_name.clone();
+                    let type_name = self.heap.get(obj_id).type_name.clone();
                     let func_name = self.resolve_method(&type_name, &method_name)?;
 
                     // Prepend self to the argument list.
-                    let mut all_args = vec![Value::Object(obj_ref)];
+                    let mut all_args = vec![Value::Object(obj_id)];
                     all_args.extend(args);
                     self.call_func_with_args(&func_name, all_args)?;
                 }
@@ -380,8 +435,8 @@ impl Vm {
                 Instr::IsType(target) => {
                     let val = self.pop()?;
                     let result = match &val {
-                        Value::Object(r) => {
-                            let runtime_type = r.borrow().type_name.clone();
+                        Value::Object(id) => {
+                            let runtime_type = self.heap.get(*id).type_name.clone();
                             self.conforms(&runtime_type, target)
                         }
                         _ => false,
@@ -393,8 +448,8 @@ impl Vm {
                 Instr::AsType(target) => {
                     let val = self.pop()?;
                     match &val {
-                        Value::Object(r) => {
-                            let runtime_type = r.borrow().type_name.clone();
+                        Value::Object(id) => {
+                            let runtime_type = self.heap.get(*id).type_name.clone();
                             if !self.conforms(&runtime_type, target) {
                                 return Err(VmError::InvalidCast {
                                     from: runtime_type,
@@ -461,12 +516,12 @@ impl Vm {
         }
     }
 
-    /// Pop the top of the stack and interpret it as an `ObjectRef`.
+    /// Pop the top of the stack and interpret it as an `ObjectId`.
     ///
     /// Returns `NullReference` for `Nil` and `TypeMismatch` for other primitives.
-    fn pop_object(&mut self) -> Result<ObjectRef, VmError> {
+    fn pop_object(&mut self) -> Result<ObjectId, VmError> {
         match self.pop()? {
-            Value::Object(r) => Ok(r),
+            Value::Object(id) => Ok(id),
             Value::Nil => Err(VmError::NullReference),
             v => Err(VmError::TypeMismatch {
                 expected: "Object",
@@ -588,8 +643,6 @@ impl Default for Vm {
 mod tests {
     use super::*;
     use hulk_ir::{IrFunc, IrProgram, IrTypeInfo};
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     fn run(instrs: &[Instr]) -> Result<Vec<Value>, VmError> {
         let mut vm = Vm::new();
@@ -597,11 +650,13 @@ mod tests {
         Ok(vm.stack.clone())
     }
 
-    fn make_object(type_name: &str) -> Value {
-        Value::Object(Rc::new(RefCell::new(Object {
+    /// Allocate an object on `vm.heap` and return a `Value::Object` handle.
+    fn make_object_on(vm: &mut Vm, type_name: &str) -> Value {
+        let id = vm.heap.alloc(Object {
             type_name: type_name.to_string(),
             fields: HashMap::new(),
-        })))
+        });
+        Value::Object(id)
     }
 
     // ── pre-existing tests ────────────────────────────────────────────────────
@@ -848,11 +903,13 @@ mod tests {
 
     #[test]
     fn new_object_creates_empty_object() {
-        let stack = run(&[Instr::NewObject("Dog".to_string()), Instr::Ret]).unwrap();
-        assert_eq!(stack.len(), 1);
-        if let Value::Object(r) = &stack[0] {
-            assert_eq!(r.borrow().type_name, "Dog");
-            assert!(r.borrow().fields.is_empty());
+        let mut vm = Vm::new();
+        vm.run(&[Instr::NewObject("Dog".to_string()), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack.len(), 1);
+        if let Value::Object(id) = &vm.stack[0] {
+            assert_eq!(vm.heap.get(*id).type_name, "Dog");
+            assert!(vm.heap.get(*id).fields.is_empty());
         } else {
             panic!("expected Object");
         }
@@ -881,8 +938,8 @@ mod tests {
 
     #[test]
     fn get_field_undefined_returns_error() {
-        let obj = make_object("Dog");
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.stack.push(obj);
         let result = vm.run(&[Instr::GetField("missing".to_string()), Instr::Ret]);
         assert!(matches!(result, Err(VmError::UndefinedField(_))));
@@ -890,8 +947,8 @@ mod tests {
 
     #[test]
     fn is_type_true_for_exact_type() {
-        let obj = make_object("Dog");
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.types.insert(
             "Dog".to_string(),
             IrTypeInfo {
@@ -914,8 +971,8 @@ mod tests {
 
     #[test]
     fn is_type_true_for_ancestor() {
-        let obj = make_object("Dog");
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.types.insert(
             "Dog".to_string(),
             IrTypeInfo {
@@ -938,8 +995,8 @@ mod tests {
 
     #[test]
     fn is_type_false_for_unrelated_type() {
-        let obj = make_object("Dog");
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.types.insert(
             "Dog".to_string(),
             IrTypeInfo {
@@ -966,8 +1023,8 @@ mod tests {
 
     #[test]
     fn as_type_succeeds_when_conforming() {
-        let obj = make_object("Dog");
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.types.insert(
             "Dog".to_string(),
             IrTypeInfo {
@@ -985,15 +1042,15 @@ mod tests {
         vm.stack.push(obj.clone());
         vm.run(&[Instr::AsType("Animal".to_string()), Instr::Ret])
             .unwrap();
-        // Same object reference returned.
+        // Same object handle returned.
         assert_eq!(vm.stack.len(), 1);
         assert_eq!(vm.stack[0], obj);
     }
 
     #[test]
     fn as_type_fails_with_invalid_cast() {
-        let obj = make_object("Dog");
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.types.insert(
             "Dog".to_string(),
             IrTypeInfo {
@@ -1010,9 +1067,9 @@ mod tests {
     fn call_method_dispatches_to_correct_implementation() {
         // type Dog { speak() => "Woof" }
         let speak_body = vec![Instr::PushStr("Woof".to_string()), Instr::Ret];
-        let obj = make_object("Dog");
 
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.functions.insert(
             "__method_Dog_speak".to_string(),
             IrFunc {
@@ -1040,9 +1097,9 @@ mod tests {
     fn call_method_inherits_from_parent_when_not_overridden() {
         // Animal has speak(); Dog inherits Animal without overriding speak.
         let speak_body = vec![Instr::PushStr("...".to_string()), Instr::Ret];
-        let obj = make_object("Dog");
 
         let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
         vm.functions.insert(
             "__method_Animal_speak".to_string(),
             IrFunc {

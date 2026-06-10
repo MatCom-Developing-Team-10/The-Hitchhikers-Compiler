@@ -10,3 +10,8 @@ description = "Stack-based bytecode interpreter and runtime for HULK."
 [dependencies]
 hulk-ir   = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+hulk-ast      = { workspace = true }
+hulk-parser   = { workspace = true }
+hulk-semantic = { workspace = true }

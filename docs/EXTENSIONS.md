@@ -144,4 +144,59 @@ Ver [tests/extension/interfaces.hulk](../tests/extension/interfaces.hulk).
 
 ## 3. Garbage Collector
 
-*(Pendiente — commit 3)*
+**Estrategia:** **mark-and-sweep** clasico con heap explicito indexado por handles `ObjectId`. Reemplaza la administracion previa basada en `Rc<RefCell<Object>>` que no podia liberar ciclos.
+
+### Modelo de memoria
+
+```rust
+// hulk-ir
+pub struct ObjectId(pub u32);                   // antes: Rc<RefCell<Object>>
+pub enum Value { Num, Bool, Str, Nil, Object(ObjectId) }
+
+// hulk-vm
+pub struct Heap {
+    slots: Vec<Slot>,        // Slot = Live(Object) | Free
+    free_list: Vec<u32>,
+    allocations_since_gc: usize,
+    pub gc_threshold: usize, // default 1024, HULK_GC_THRESHOLD
+}
+```
+
+### Algoritmo
+
+1. **Mark:** DFS desde las raices (stack + scopes de la VM). Cualquier `Value::Object(id)` se enqueue y se marca como vivo. Se siguen los `fields` recursivamente.
+2. **Sweep:** los slots `Live` no marcados se convierten en `Free` y su id se agrega al `free_list` para reuso.
+3. **Trigger:** despues de cada `NewObject`, si `heap.should_collect()` (alocaciones acumuladas ≥ threshold), se llama a `heap.collect(self.roots())`.
+
+### Reglas
+
+| Regla | Comportamiento |
+|-------|----------------|
+| **Reclama ciclos** | `a.next := b; b.next := a;` sin raices → ambos liberados (mark-and-sweep no usa conteo). |
+| **Reuso de slots** | Los ids son indices estables; al liberar un slot, su id se recicla. |
+| **Sin compactacion** | El `Vec<Slot>` crece monotonicamente; solo se reusa via `free_list`. |
+| **Backwards compat** | Todos los tests de OOP existentes pasan. El output observable es identico. |
+| **Configurabilidad** | `HULK_GC_THRESHOLD=1` fuerza GC por cada alocacion (util para tests). |
+
+### Cambios en la implementacion
+
+| Capa | Cambio |
+|------|--------|
+| IR | `ObjectId(u32)` reemplaza `ObjectRef = Rc<RefCell<Object>>`. `Value::Object(ObjectId)`. `Display` de objetos imprime `<object #N>`. |
+| VM | Nuevo modulo `heap.rs` con `Heap`, `Slot`, mark-and-sweep. `Vm` tiene `heap: Heap`. Helpers `roots()`, `maybe_gc()`, `format_value()`. `pop_object()` devuelve `ObjectId`. Print usa formato heap-aware. |
+| Tests | `make_object_on(&mut vm, name)` aloca via heap. `Vm::force_gc()` y `set_stack_for_testing` expuestos para integration tests. |
+
+### Ejemplo end-to-end
+
+Ver [tests/extension/gc.hulk](../tests/extension/gc.hulk) — loop de 100 iteraciones que crea `Box(i)` ephemero, suma su valor. Con `HULK_GC_THRESHOLD=8`, el heap crece y se libera repetidamente sin perder correccion.
+
+### Detalles tecnicos
+
+Ver [crates/hulk-vm/vm-v4.spec.md](../crates/hulk-vm/vm-v4.spec.md).
+
+### Comparativa con otros lenguajes
+
+- **Python**: usa principalmente reference counting con un cycle collector adicional (similar a Bacon-Rajan). HULK simplifico usando solo tracing.
+- **Lua**: incremental mark-and-sweep. HULK usa la version stop-the-world por simplicidad.
+- **Java/Go**: generacional con colectores concurrentes. Fuera del scope de un compilador educativo.
+- **Rust**: no tiene GC — ownership estatica. HULK necesita GC porque permite mutacion compartida via objetos.

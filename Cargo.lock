@@ -300,7 +300,10 @@ dependencies = [
 name = "hulk-vm"
 version = "0.1.0"
 dependencies = [
+ "hulk-ast",
  "hulk-ir",
+ "hulk-parser",
+ "hulk-semantic",
  "thiserror",
 ]
 

@@ -1,0 +1,22 @@
+// GC extension demo.
+//
+// This program allocates many ephemeral boxes in a loop. With the
+// previous Rc<RefCell<>> model each iteration leaked memory; the new
+// mark-and-sweep GC reclaims unreachable objects so the live count
+// stays bounded.
+//
+// Run with `HULK_GC_THRESHOLD=8 cargo run -p hulkc -- run
+// tests/extension/gc.hulk` to see aggressive collection.
+
+type Box(v: Number) {
+    v: Number = v;
+    get(): Number => self.v;
+}
+
+let acc = 0 in {
+    let i = 0 in while (i < 100) {
+        acc := acc + (new Box(i)).get();
+        i := i + 1;
+    };
+    print(acc);
+};
