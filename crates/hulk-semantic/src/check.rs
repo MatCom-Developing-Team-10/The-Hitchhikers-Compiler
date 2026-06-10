@@ -208,10 +208,32 @@ impl Checker {
                 .collect();
             let mut attrs = HashMap::new();
             for a in &td.attributes {
-                attrs.insert(
-                    a.name.clone(),
-                    self.resolve_or_default(a.ty.as_deref(), a.span),
-                );
+                let attr_type = if a.ty.is_some() {
+                    self.resolve_or_default(a.ty.as_deref(), a.span)
+                } else {
+                    // No explicit annotation: infer from the initializer expression
+                    // using ctor params as scope. Errors are suppressed here because
+                    // check_bodies will report them with full context.
+                    let saved = self.errors.len();
+                    let mut env = Env::new();
+                    for (pname, pty) in &ctor_params {
+                        env.define(
+                            pname,
+                            Binding {
+                                ty: pty.clone(),
+                                span: a.span,
+                            },
+                        );
+                    }
+                    let inferred = self.check_expr(&mut env, &a.init);
+                    self.errors.truncate(saved);
+                    if inferred == Type::Error {
+                        Type::Object
+                    } else {
+                        inferred
+                    }
+                };
+                attrs.insert(a.name.clone(), attr_type);
             }
             let mut methods = HashMap::new();
             for m in &td.methods {
