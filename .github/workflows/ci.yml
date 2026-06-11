@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**", "fix/**"]
   pull_request:
     branches: [main]
 
@@ -11,17 +11,16 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  test:
-    name: Build & Test
+  fmt:
+    name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build workspace
-        run: cargo build --workspace --verbose
-      - name: Run tests
-        run: cargo test --workspace --verbose
+        with:
+          components: rustfmt
+      - name: Format check
+        run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy
@@ -35,13 +34,29 @@ jobs:
       - name: Clippy lint
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-  fmt:
-    name: Rustfmt
+  test:
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Format check
-        run: cargo fmt --all -- --check
+      - uses: Swatinem/rust-cache@v2
+      - name: Build workspace
+        run: cargo build --workspace
+      - name: Run unit & integration tests
+        run: cargo test --workspace
+
+  test-e2e:
+    name: E2E Tests (hulk_std)
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build hulkc
+        run: cargo build -p hulkc
+      - name: Run HULK integration tests
+        env:
+          HULKC: ./target/debug/hulkc
+        run: bash tests/run_tests.sh
