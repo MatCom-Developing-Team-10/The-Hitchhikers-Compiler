@@ -1,0 +1,6 @@
+// A.2.2 — String literals and concatenation
+{
+    print("Hello World");
+    print("The meaning of life is " @ 42);
+    print("foo" @@ "bar");
+}

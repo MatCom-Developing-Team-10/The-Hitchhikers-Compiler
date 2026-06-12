@@ -1,0 +1,6 @@
+// A.4.6 — Destructive assignment
+let a = 0 in {
+    print(a);
+    a := 1;
+    print(a);
+}

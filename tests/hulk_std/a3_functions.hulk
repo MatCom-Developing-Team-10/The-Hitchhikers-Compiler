@@ -1,0 +1,14 @@
+// A.3 — Functions: inline, full-form, and recursive
+function tan(x: Number): Number => sin(x) / cos(x);
+
+function fib(n: Number): Number => if (n <= 1) n else fib(n - 1) + fib(n - 2);
+
+function factorial(n: Number): Number {
+    if (n == 0) 1 else n * factorial(n - 1)
+}
+
+{
+    print(tan(PI / 4));
+    print(fib(10));
+    print(factorial(5));
+}

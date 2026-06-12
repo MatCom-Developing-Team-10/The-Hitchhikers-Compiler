@@ -1,0 +1,2 @@
+// A.4 — Variables: let, multi-let, scoping, destructive assignment
+let msg = "Hello World" in print(msg);

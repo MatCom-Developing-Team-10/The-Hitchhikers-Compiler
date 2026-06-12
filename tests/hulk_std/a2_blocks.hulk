@@ -1,0 +1,6 @@
+// A.2.4 — Expression blocks
+{
+    print(42);
+    print(sin(PI / 2));
+    print("Hello World");
+}

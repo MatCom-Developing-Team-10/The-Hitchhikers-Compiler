@@ -1,0 +1,11 @@
+// A.8.5 — Testing dynamic types with is
+type Bird {
+    fly() => "flap";
+}
+
+type Plane {
+    fly() => "vroom";
+}
+
+let b: Object = new Bird() in
+    print(if (b is Bird) "It's a bird!" else "Not a bird");

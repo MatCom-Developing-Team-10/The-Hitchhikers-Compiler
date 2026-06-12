@@ -1,0 +1,12 @@
+// A.7.3 / A.7.4 — Inheritance and polymorphism with base()
+type Person(firstname: String, lastname: String) {
+    firstname = firstname;
+    lastname = lastname;
+    name(): String => self.firstname @@ self.lastname;
+}
+
+type Knight(firstname: String, lastname: String) inherits Person(firstname, lastname) {
+    name(): String => "Sir" @@ base();
+}
+
+let p = new Knight("Phil", "Collins") in print(p.name());

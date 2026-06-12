@@ -1,0 +1,4 @@
+// A.8.1 / A.8.2 — Type annotations on variables and functions
+function double(x: Number): Number => x * 2;
+
+let x: Number = 21 in print(double(x));

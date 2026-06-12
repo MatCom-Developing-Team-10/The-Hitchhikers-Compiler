@@ -1,0 +1,10 @@
+// A.5 — Conditionals: if / elif / else
+let a = 42 in {
+    print(if (a % 2 == 0) "even" else "odd");
+    let mod = a % 3 in
+        print(
+            if (mod == 0) "Magic"
+            elif (mod == 1) "Woke"
+            else "Dumb"
+        );
+}
