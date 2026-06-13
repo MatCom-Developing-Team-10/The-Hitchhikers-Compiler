@@ -201,6 +201,13 @@ pub enum Instr {
     /// Virtual method dispatch: pop self (top) after `argc` args; call the
     /// resolved implementation with `[self, arg₀, …, argₙ₋₁]`.
     CallMethod(String, usize),
+    /// Parent dispatch for `base(...)`: like [`CallMethod`] but method
+    /// resolution starts from a fixed ancestor type (the first argument: the
+    /// parent type), walking up the inheritance chain. This skips the current
+    /// type's override and,
+    /// unlike a direct `Call`, finds the implementation even when it is
+    /// declared by a grandparent rather than the immediate parent.
+    CallBase(String, String, usize),
     /// Pop value; push `true` if it is an Object whose runtime type conforms
     /// to `type_name` (walking the inheritance chain).
     IsType(String),
@@ -292,6 +299,12 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             _ => out.push(Instr::LoadVar(name.clone())),
         },
 
+        // `&` and `|` short-circuit (spec A: boolean operators with their usual
+        // semantics): the right operand is only evaluated when the left does
+        // not already determine the result.
+        ExprKind::BinOp(BinOp::And, lhs, rhs) => lower_and(lhs, rhs, out, ctx),
+        ExprKind::BinOp(BinOp::Or, lhs, rhs) => lower_or(lhs, rhs, out, ctx),
+
         ExprKind::BinOp(op, lhs, rhs) => {
             lower_inner(lhs, out, ctx);
             lower_inner(rhs, out, ctx);
@@ -302,8 +315,6 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
                 BinOp::Div => Instr::Div,
                 BinOp::Pow => Instr::Pow,
                 BinOp::Mod => Instr::Mod,
-                BinOp::And => Instr::And,
-                BinOp::Or => Instr::Or,
                 BinOp::Eq => Instr::Eq,
                 BinOp::Ne => Instr::Ne,
                 BinOp::Lt => Instr::Lt,
@@ -312,6 +323,9 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
                 BinOp::Ge => Instr::Ge,
                 BinOp::Concat => Instr::Concat,
                 BinOp::ConcatWs => Instr::ConcatWs,
+                BinOp::And | BinOp::Or => {
+                    unreachable!("And/Or handled by short-circuit arms above")
+                }
             };
             out.push(instr);
         }
@@ -450,7 +464,10 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             out.push(Instr::CallMethod(method.clone(), args.len()));
         }
 
-        // base(args)  — call parent's version of the current method
+        // base(args)  — call the parent's version of the current method.
+        // Resolution starts from the immediate parent type and walks up the
+        // chain, so a method declared by a grandparent (not the direct parent)
+        // is still found at runtime.
         ExprKind::Base(args) => {
             let current_method = ctx
                 .current_method
@@ -463,11 +480,8 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             for arg in args {
                 lower_inner(arg, out, ctx);
             }
-            out.push(Instr::LoadVar("self".to_string()));
-            out.push(Instr::Call(
-                format!("__method_{parent_type}_{current_method}"),
-                args.len() + 1,
-            ));
+            out.push(Instr::LoadVar("self".to_string())); // self on top
+            out.push(Instr::CallBase(parent_type, current_method, args.len()));
         }
 
         // expr is Type  (type erasure: only the base name matters at runtime)
@@ -521,6 +535,35 @@ fn lower_if(
     out.push(Instr::Label(format!("else_{id}")));
     lower_inner(else_, out, ctx);
     out.push(Instr::Label(end_label));
+}
+
+/// Short-circuit `a & b`: if `a` is false the result is `false` and `b` is not
+/// evaluated; otherwise the result is `b`.
+fn lower_and(lhs: &Expr, rhs: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
+    let id = ctx.next();
+    let end = format!("and_end_{id}");
+    lower_inner(lhs, out, ctx);
+    out.push(Instr::Dup); // keep a copy of `a` as the false-path result
+    out.push(Instr::JumpIfFalse(end.clone())); // a == false → result is a (false)
+    out.push(Instr::Pop); // a == true → discard it, result is b
+    lower_inner(rhs, out, ctx);
+    out.push(Instr::Label(end));
+}
+
+/// Short-circuit `a | b`: if `a` is true the result is `true` and `b` is not
+/// evaluated; otherwise the result is `b`.
+fn lower_or(lhs: &Expr, rhs: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
+    let id = ctx.next();
+    let eval_rhs = format!("or_rhs_{id}");
+    let end = format!("or_end_{id}");
+    lower_inner(lhs, out, ctx);
+    out.push(Instr::Dup); // keep a copy of `a` as the true-path result
+    out.push(Instr::JumpIfFalse(eval_rhs.clone())); // a == false → evaluate b
+    out.push(Instr::Jump(end.clone())); // a == true → result is a (true)
+    out.push(Instr::Label(eval_rhs));
+    out.push(Instr::Pop); // discard the false `a`, result is b
+    lower_inner(rhs, out, ctx);
+    out.push(Instr::Label(end));
 }
 
 fn lower_while(cond: &Expr, body: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
@@ -1070,6 +1113,44 @@ mod tests {
                 Instr::PushNum(2.0),
                 Instr::Pop,
                 Instr::PushNum(3.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_and_short_circuits() {
+        // a & b → Dup; JumpIfFalse(end); Pop; lower(b); Label(end)
+        let mut out = Vec::new();
+        lower_expr(&binop(BinOp::And, ident("a"), ident("b")), &mut out);
+        assert_eq!(
+            out,
+            vec![
+                Instr::LoadVar("a".to_string()),
+                Instr::Dup,
+                Instr::JumpIfFalse("and_end_0".to_string()),
+                Instr::Pop,
+                Instr::LoadVar("b".to_string()),
+                Instr::Label("and_end_0".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_or_short_circuits() {
+        // a | b → Dup; JumpIfFalse(rhs); Jump(end); Label(rhs); Pop; lower(b); Label(end)
+        let mut out = Vec::new();
+        lower_expr(&binop(BinOp::Or, ident("a"), ident("b")), &mut out);
+        assert_eq!(
+            out,
+            vec![
+                Instr::LoadVar("a".to_string()),
+                Instr::Dup,
+                Instr::JumpIfFalse("or_rhs_0".to_string()),
+                Instr::Jump("or_end_0".to_string()),
+                Instr::Label("or_rhs_0".to_string()),
+                Instr::Pop,
+                Instr::LoadVar("b".to_string()),
+                Instr::Label("or_end_0".to_string()),
             ]
         );
     }

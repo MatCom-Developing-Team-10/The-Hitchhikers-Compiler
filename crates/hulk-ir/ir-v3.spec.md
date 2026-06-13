@@ -43,7 +43,8 @@ distintas aunque tengan los mismos campos). Se usa `Rc::ptr_eq`.
 | `NewObject(type_name)` | `[...]` | `[..., obj]` | Crea objeto vacío con type tag |
 | `GetField(name)` | `[..., obj]` | `[..., val]` | Lee campo del objeto |
 | `SetField(name)` | `[..., val, obj]` | `[..., val]` | Escribe campo; retorna val |
-| `CallMethod(name, argc)` | `[..., arg₀…argₙ₋₁, self]` | `[..., result]` | Dispatch virtual |
+| `CallMethod(name, argc)` | `[..., arg₀…argₙ₋₁, self]` | `[..., result]` | Dispatch virtual (resuelve desde el tipo runtime) |
+| `CallBase(start_type, name, argc)` | `[..., arg₀…argₙ₋₁, self]` | `[..., result]` | Dispatch de `base(...)`: resuelve desde `start_type` (el padre), camina hacia arriba |
 | `IsType(name)` | `[..., val]` | `[..., bool]` | Comprueba si val conforma `name` |
 | `AsType(name)` | `[..., val]` | `[..., val]` | Assert de tipo; error si no conforma |
 
@@ -139,11 +140,14 @@ AsType(type_name)
 ### `Base(args)` — dentro de método `m` de tipo `Child` con padre `Parent`
 ```
 lower(arg₀); ...; lower(argₙ₋₁)
-LoadVar("self")
-Call("__method_{Parent}_m", n_args + 1)
+LoadVar("self")            // self en el tope
+CallBase("{Parent}", "m", n_args)
 ```
-`Parent` y `m` se resuelven en tiempo de lowering via `Ctx::current_type`
-y `Ctx::current_method`.
+`Parent` y `m` se resuelven en tiempo de lowering via `Ctx::parent_type`
+y `Ctx::current_method`. Se emite `CallBase` (no un `Call` directo a
+`__method_{Parent}_m`) porque el método puede estar declarado en un **abuelo**
+y no en el padre inmediato; `CallBase` resuelve caminando hacia arriba desde
+`Parent`.
 
 ---
 

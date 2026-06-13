@@ -141,6 +141,35 @@ Jump("loop_start_{n}")
 Label("loop_end_{n}")          ← tope de pila = resultado del while
 ```
 
+### §4.2.1 Lowering de `&` y `|` (cortocircuito)
+
+Los operadores booleanos `&` y `|` evalúan el operando derecho **solo** cuando
+el izquierdo no determina ya el resultado (spec A: «con sus semánticas
+usuales»). No emiten `Instr::And` / `Instr::Or`; usan saltos:
+
+```
+# a & b
+lower(a)
+Dup
+JumpIfFalse("and_end_{id}")    ← a == false → resultado = a (false)
+Pop                            ← a == true  → descarta a, resultado = b
+lower(b)
+Label("and_end_{id}")
+
+# a | b
+lower(a)
+Dup
+JumpIfFalse("or_rhs_{id}")     ← a == false → evaluar b
+Jump("or_end_{id}")            ← a == true  → resultado = a (true)
+Label("or_rhs_{id}")
+Pop                            ← descarta a (false), resultado = b
+lower(b)
+Label("or_end_{id}")
+```
+
+Las instrucciones `Instr::And` / `Instr::Or` siguen existiendo en el ISA (la VM
+las soporta) pero el lowering ya no las genera.
+
 ### §4.3 Labels únicas
 
 Se usa un contador global (`Ctx.counter: usize`) que se incrementa con cada

@@ -1078,10 +1078,10 @@ impl Checker {
                     });
                     return Type::Error;
                 };
-                // Validate generic arity against the type declaration.
-                if info.generic_params.len() != type_args.len()
-                    && (!type_args.is_empty() || !info.generic_params.is_empty())
-                {
+                // Validate generic arity against the type declaration. When the
+                // counts differ, at least one side is non-empty, so the mismatch
+                // covers both "missing args" and "args on a non-generic type".
+                if info.generic_params.len() != type_args.len() {
                     self.errors.push(SemError::Arity {
                         expected: info.generic_params.len(),
                         found: type_args.len(),
