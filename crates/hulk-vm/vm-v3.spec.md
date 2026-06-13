@@ -56,13 +56,33 @@ Stack antes: `[..., val, obj]` (obj en el tope).
 
 ### `CallMethod(method_name, argc)`
 
-1. Pop `argc` args (orden LIFO → reverse para orden natural).
-2. Pop self; debe ser `Value::Object` → `NullReference` si Nil,
+El layout del stack es `[arg₀, …, argₙ₋₁, self]` con `self` en el tope, por lo
+que **se hace pop de `self` PRIMERO y luego de los args**. Invertir este orden
+intercambia `self` con un argumento (bug corregido en el review 2026-06-13).
+
+1. Pop self; debe ser `Value::Object` → `NullReference` si Nil,
    `TypeMismatch` si otro tipo.
+2. Pop `argc` args (orden LIFO → reverse para orden natural).
 3. `type_name = self_obj.borrow().type_name.clone()`.
 4. `func_name = resolve_method(type_name, method_name)?`.
 5. Construir `all_args = [Value::Object(self_rc)] + args`.
 6. Llamar `call_func_with_args(func_name, all_args)`.
+
+### `CallBase(start_type, method_name, argc)`
+
+Dispatch para `base(...)`. Idéntico a `CallMethod` salvo que la resolución del
+método **no** parte del tipo en runtime del receptor sino de `start_type` (el
+tipo padre fijado en lowering). Así se salta el override del tipo actual y se
+encuentra la implementación aunque la declare un **abuelo** (y no el padre
+inmediato). Un `Call("__method_{padre}_{m}")` directo solo funcionaría si el
+padre inmediato declara el método.
+
+1. Pop self (mismo manejo de errores que `CallMethod`).
+2. Pop `argc` args (reverse para orden natural).
+3. `func_name = resolve_method(start_type, method_name)?` — camina hacia arriba
+   desde `start_type`.
+4. Construir `all_args = [Value::Object(self_rc)] + args`.
+5. Llamar `call_func_with_args(func_name, all_args)`.
 
 ### `IsType(type_name)`
 

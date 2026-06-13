@@ -94,6 +94,32 @@ fn force_gc_traces_through_chained_fields() {
 }
 
 #[test]
+fn nested_call_does_not_collect_outer_frame_objects() {
+    // Regression: a nested call must not let the GC reclaim objects that are
+    // only reachable from a suspended caller frame. With threshold 1, the
+    // allocation inside `make()` triggers a sweep while `a` lives solely in the
+    // entry scope. Before the fix, `a` was swept and `a.get()` panicked.
+    unsafe { std::env::set_var("HULK_GC_THRESHOLD", "1") };
+    let source = r#"
+        type Box(v: Number) {
+            v: Number = v;
+            get(): Number => self.v;
+        }
+        function make(): Box => new Box(5);
+        let a = new Box(1) in { make(); print(a.get()); };
+    "#;
+    let ast = hulk_parser::parse(source).expect("parse");
+    hulk_semantic::analyze(&ast).expect("semantic");
+    let ir = hulk_ir::lower_program(&ast);
+    let result = hulk_vm::Vm::run_program(ir);
+    unsafe { std::env::remove_var("HULK_GC_THRESHOLD") };
+    assert!(
+        result.is_ok(),
+        "outer-frame object was collected: {result:?}"
+    );
+}
+
+#[test]
 fn end_to_end_program_with_low_gc_threshold() {
     // Set the GC threshold to 1 so every NewObject triggers a sweep.
     // SAFETY: tests run in a single process; this writes a process-wide var.

@@ -201,6 +201,12 @@ pub enum Instr {
     /// Virtual method dispatch: pop self (top) after `argc` args; call the
     /// resolved implementation with `[self, arg₀, …, argₙ₋₁]`.
     CallMethod(String, usize),
+    /// Parent dispatch for `base(...)`: like [`CallMethod`] but method
+    /// resolution starts from a fixed ancestor type (the first field), walking
+    /// up the inheritance chain. This skips the current type's override and,
+    /// unlike a direct `Call`, finds the implementation even when it is
+    /// declared by a grandparent rather than the immediate parent.
+    CallBase(String, String, usize),
     /// Pop value; push `true` if it is an Object whose runtime type conforms
     /// to `type_name` (walking the inheritance chain).
     IsType(String),
@@ -450,7 +456,10 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             out.push(Instr::CallMethod(method.clone(), args.len()));
         }
 
-        // base(args)  — call parent's version of the current method
+        // base(args)  — call the parent's version of the current method.
+        // Resolution starts from the immediate parent type and walks up the
+        // chain, so a method declared by a grandparent (not the direct parent)
+        // is still found at runtime.
         ExprKind::Base(args) => {
             let current_method = ctx
                 .current_method
@@ -463,11 +472,8 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             for arg in args {
                 lower_inner(arg, out, ctx);
             }
-            out.push(Instr::LoadVar("self".to_string()));
-            out.push(Instr::Call(
-                format!("__method_{parent_type}_{current_method}"),
-                args.len() + 1,
-            ));
+            out.push(Instr::LoadVar("self".to_string())); // self on top
+            out.push(Instr::CallBase(parent_type, current_method, args.len()));
         }
 
         // expr is Type  (type erasure: only the base name matters at runtime)

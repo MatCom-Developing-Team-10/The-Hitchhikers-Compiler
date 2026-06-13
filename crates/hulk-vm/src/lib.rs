@@ -50,10 +50,21 @@ pub enum VmError {
 
 // ── VM ────────────────────────────────────────────────────────────────────────
 
+/// A suspended caller frame: the operand stack and scope chain of a function
+/// that is currently waiting for a callee to return. Kept inside the VM (rather
+/// than as Rust locals) so that objects referenced only by outer frames stay
+/// reachable from the GC root set while a nested call allocates.
+struct Frame {
+    stack: Vec<Value>,
+    scopes: Vec<HashMap<String, Value>>,
+}
+
 /// Stack-based virtual machine.
 pub struct Vm {
     stack: Vec<Value>,
     scopes: Vec<HashMap<String, Value>>,
+    /// Suspended caller frames, outermost first. Their objects are GC roots.
+    call_stack: Vec<Frame>,
     functions: HashMap<String, IrFunc>,
     /// Type metadata for virtual dispatch and `is`/`as` conformance checks.
     types: HashMap<String, IrTypeInfo>,
@@ -67,6 +78,7 @@ impl Vm {
         Self {
             stack: Vec::new(),
             scopes: Vec::new(),
+            call_stack: Vec::new(),
             functions: HashMap::new(),
             types: HashMap::new(),
             heap: Heap::new(),
@@ -78,6 +90,7 @@ impl Vm {
         let mut vm = Self {
             stack: Vec::new(),
             scopes: Vec::new(),
+            call_stack: Vec::new(),
             functions: ir.funcs,
             types: ir.types,
             heap: Heap::new(),
@@ -111,6 +124,11 @@ impl Vm {
     fn roots(&self) -> Vec<ObjectId> {
         let mut out: Vec<ObjectId> = heap::ids_in_values(self.stack.iter()).into_iter().collect();
         out.extend(heap::ids_in_scopes(&self.scopes));
+        // Suspended caller frames keep their objects alive across nested calls.
+        for frame in &self.call_stack {
+            out.extend(heap::ids_in_values(frame.stack.iter()));
+            out.extend(heap::ids_in_scopes(&frame.scopes));
+        }
         out
     }
 
@@ -403,29 +421,39 @@ impl Vm {
                     let method_name = method_name.clone();
                     let argc = *argc;
 
-                    // Pop args (reverse to get natural order).
+                    // Stack layout is `[arg₀, …, argₙ₋₁, self]` with self on
+                    // top, so pop self first, then the args (reversed back into
+                    // natural order).
+                    let obj_id = self.pop_object()?;
                     let mut args: Vec<Value> = (0..argc)
                         .map(|_| self.pop())
                         .collect::<Result<Vec<_>, _>>()?;
                     args.reverse();
 
-                    // Pop self.
-                    let self_val = self.pop()?;
-                    let obj_id = match &self_val {
-                        Value::Object(id) => *id,
-                        Value::Nil => return Err(VmError::NullReference),
-                        v => {
-                            return Err(VmError::TypeMismatch {
-                                expected: "Object",
-                                got: v.type_name(),
-                            });
-                        }
-                    };
-
                     let type_name = self.heap.get(obj_id).type_name.clone();
                     let func_name = self.resolve_method(&type_name, &method_name)?;
 
                     // Prepend self to the argument list.
+                    let mut all_args = vec![Value::Object(obj_id)];
+                    all_args.extend(args);
+                    self.call_func_with_args(&func_name, all_args)?;
+                }
+
+                // Parent dispatch for `base(...)`: resolve starting from a fixed
+                // ancestor type instead of the receiver's runtime type.
+                Instr::CallBase(start_type, method_name, argc) => {
+                    let start_type = start_type.clone();
+                    let method_name = method_name.clone();
+                    let argc = *argc;
+
+                    let obj_id = self.pop_object()?;
+                    let mut args: Vec<Value> = (0..argc)
+                        .map(|_| self.pop())
+                        .collect::<Result<Vec<_>, _>>()?;
+                    args.reverse();
+
+                    let func_name = self.resolve_method(&start_type, &method_name)?;
+
                     let mut all_args = vec![Value::Object(obj_id)];
                     all_args.extend(args);
                     self.call_func_with_args(&func_name, all_args)?;
@@ -547,8 +575,12 @@ impl Vm {
             .cloned()
             .ok_or_else(|| VmError::UndefinedFunction(name.to_string()))?;
 
-        let saved_stack = std::mem::take(&mut self.stack);
-        let saved_scopes = std::mem::take(&mut self.scopes);
+        // Suspend the caller frame inside the VM (not as Rust locals) so its
+        // objects remain GC roots while this call allocates.
+        self.call_stack.push(Frame {
+            stack: std::mem::take(&mut self.stack),
+            scopes: std::mem::take(&mut self.scopes),
+        });
 
         let mut scope = HashMap::new();
         for (param, arg) in func.params.iter().zip(args) {
@@ -561,8 +593,14 @@ impl Vm {
 
         let ret_val = self.stack.pop().unwrap_or(Value::Nil);
 
-        self.scopes = saved_scopes;
-        self.stack = saved_stack;
+        // Restore the caller frame. No allocation happens between here and the
+        // push of `ret_val`, so `ret_val` cannot be collected meanwhile.
+        let frame = self
+            .call_stack
+            .pop()
+            .expect("invariant: call frame balanced");
+        self.scopes = frame.scopes;
+        self.stack = frame.stack;
 
         result?;
         self.stack.push(ret_val);
@@ -1091,6 +1129,97 @@ mod tests {
         vm.run(&[Instr::CallMethod("speak".to_string(), 0), Instr::Ret])
             .unwrap();
         assert_eq!(vm.stack, vec![Value::Str("Woof".to_string())]);
+    }
+
+    #[test]
+    fn call_method_passes_arguments_in_order() {
+        // Regression: `obj.add(x)` must bind self=obj and the param=x, not the
+        // other way around. Stack is [arg, self] with self on top.
+        // __method_Box_add(self, x) => self.v + x, with v preset to 100.
+        let add_body = vec![
+            Instr::LoadVar("self".to_string()),
+            Instr::GetField("v".to_string()),
+            Instr::LoadVar("x".to_string()),
+            Instr::Add,
+            Instr::Ret,
+        ];
+        let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Box");
+        if let Value::Object(id) = &obj {
+            vm.heap
+                .get_mut(*id)
+                .fields
+                .insert("v".to_string(), Value::Num(100.0));
+        }
+        vm.functions.insert(
+            "__method_Box_add".to_string(),
+            IrFunc {
+                params: vec!["self".to_string(), "x".to_string()],
+                body: add_body,
+            },
+        );
+        vm.types.insert(
+            "Box".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: [("add".to_string(), "__method_Box_add".to_string())]
+                    .into_iter()
+                    .collect(),
+            },
+        );
+        // Stack: [arg(5), self] with self on top.
+        vm.stack.push(Value::Num(5.0));
+        vm.stack.push(obj);
+        vm.run(&[Instr::CallMethod("add".to_string(), 1), Instr::Ret])
+            .unwrap();
+        assert_eq!(vm.stack, vec![Value::Num(105.0)]);
+    }
+
+    #[test]
+    fn call_base_resolves_through_grandparent() {
+        // C inherits B inherits A; A declares greet(), B does not override.
+        // CallBase starting at B must walk up and find A's greet().
+        let greet_body = vec![Instr::PushStr("A".to_string()), Instr::Ret];
+        let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "C");
+        vm.functions.insert(
+            "__method_A_greet".to_string(),
+            IrFunc {
+                params: vec!["self".to_string()],
+                body: greet_body,
+            },
+        );
+        vm.types.insert(
+            "A".to_string(),
+            IrTypeInfo {
+                parent: "Object".to_string(),
+                methods: [("greet".to_string(), "__method_A_greet".to_string())]
+                    .into_iter()
+                    .collect(),
+            },
+        );
+        vm.types.insert(
+            "B".to_string(),
+            IrTypeInfo {
+                parent: "A".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.types.insert(
+            "C".to_string(),
+            IrTypeInfo {
+                parent: "B".to_string(),
+                methods: HashMap::new(),
+            },
+        );
+        vm.stack.push(obj); // self on top, argc=0
+        // base() from inside C.greet() starts resolution at the parent, B.
+        vm.run(&[
+            Instr::CallBase("B".to_string(), "greet".to_string(), 0),
+            Instr::Ret,
+        ])
+        .unwrap();
+        assert_eq!(vm.stack, vec![Value::Str("A".to_string())]);
     }
 
     #[test]
