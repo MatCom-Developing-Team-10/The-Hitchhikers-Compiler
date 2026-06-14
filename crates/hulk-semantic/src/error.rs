@@ -99,6 +99,9 @@ pub enum SemError {
 
     #[error("cannot instantiate interface `{name}` — use a concrete type")]
     CannotInstantiateInterface { name: String, span: Span },
+
+    #[error("type `{ty}` is not iterable (it provides no `current()` method)")]
+    NotIterable { ty: String, span: Span },
 }
 
 impl SemError {
@@ -125,7 +128,8 @@ impl SemError {
             SemError::NotAnInterface { span, .. }
             | SemError::MissingInterfaceMethod { span, .. }
             | SemError::InterfaceSignatureMismatch { span, .. }
-            | SemError::CannotInstantiateInterface { span, .. } => *span,
+            | SemError::CannotInstantiateInterface { span, .. }
+            | SemError::NotIterable { span, .. } => *span,
         }
     }
 }

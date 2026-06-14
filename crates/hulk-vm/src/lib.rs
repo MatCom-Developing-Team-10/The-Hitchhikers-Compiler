@@ -6,10 +6,18 @@
 pub mod heap;
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use heap::Heap;
 use hulk_ir::{Instr, IrFunc, IrProgram, IrTypeInfo, Object, ObjectId, Value};
 use thiserror::Error;
+
+/// Maximum number of nested HULK function calls before the VM reports
+/// [`VmError::StackOverflow`]. The interpreter recurses on the native stack for
+/// each call (see [`Vm::run_program`], which provides a large stack), so this
+/// bound is chosen to stay safely below native exhaustion while still admitting
+/// the deep recursion typical of teaching examples.
+pub const DEFAULT_MAX_CALL_DEPTH: usize = 10_000;
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +58,10 @@ pub enum VmError {
     /// Signals malformed bytecode (an IR-lowering bug) rather than a user error.
     #[error("internal error: jump to undefined label `{0}`")]
     UndefinedLabel(String),
+    /// Nested function calls exceeded [`DEFAULT_MAX_CALL_DEPTH`] (likely
+    /// unbounded recursion). Reported instead of aborting on native overflow.
+    #[error("call stack overflow (recursion too deep)")]
+    StackOverflow,
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
@@ -63,17 +75,36 @@ struct Frame {
     scopes: Vec<HashMap<String, Value>>,
 }
 
+/// Derive a non-zero seed for the `rand` PRNG from the system clock.
+fn seed_rng() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    // xorshift requires a non-zero state.
+    nanos | 1
+}
+
 /// Stack-based virtual machine.
 pub struct Vm {
     stack: Vec<Value>,
     scopes: Vec<HashMap<String, Value>>,
     /// Suspended caller frames, outermost first. Their objects are GC roots.
     call_stack: Vec<Frame>,
-    functions: HashMap<String, IrFunc>,
+    /// Function bodies behind `Rc` so a call clones a handle, not the body.
+    functions: HashMap<String, Rc<IrFunc>>,
+    /// Label-resolution tables, computed once per function on first call and
+    /// reused on every subsequent (e.g. recursive) invocation.
+    label_cache: HashMap<String, Rc<HashMap<String, usize>>>,
     /// Type metadata for virtual dispatch and `is`/`as` conformance checks.
     types: HashMap<String, IrTypeInfo>,
     /// GC-managed heap for all `Value::Object` allocations.
     pub heap: Heap,
+    /// Maximum nested call depth before [`VmError::StackOverflow`].
+    max_call_depth: usize,
+    /// xorshift64* state for `rand` (seeded once at construction).
+    rng_state: u64,
 }
 
 impl Vm {
@@ -84,22 +115,51 @@ impl Vm {
             scopes: Vec::new(),
             call_stack: Vec::new(),
             functions: HashMap::new(),
+            label_cache: HashMap::new(),
             types: HashMap::new(),
             heap: Heap::new(),
+            max_call_depth: DEFAULT_MAX_CALL_DEPTH,
+            rng_state: seed_rng(),
         }
     }
 
+    /// Override the nested-call-depth limit (mainly for tests that want to
+    /// trigger [`VmError::StackOverflow`] without exhausting the native stack).
+    pub fn set_max_call_depth(&mut self, depth: usize) {
+        self.max_call_depth = depth;
+    }
+
+    /// Register a program's functions and types on this VM, wrapping each
+    /// function body in an `Rc` for cheap per-call cloning.
+    fn load(&mut self, funcs: HashMap<String, IrFunc>, types: HashMap<String, IrTypeInfo>) {
+        self.functions = funcs.into_iter().map(|(k, v)| (k, Rc::new(v))).collect();
+        self.types = types;
+    }
+
     /// Convenience: load an [`IrProgram`] and execute its entry point.
+    ///
+    /// The interpreter recurses on the native stack for each HULK function
+    /// call, so execution runs on a dedicated thread with a large stack; deep
+    /// but valid recursion would otherwise overflow the default main-thread
+    /// stack. Runaway recursion is still caught early as
+    /// [`VmError::StackOverflow`] (see [`DEFAULT_MAX_CALL_DEPTH`]).
     pub fn run_program(ir: IrProgram) -> Result<(), VmError> {
-        let mut vm = Self {
-            stack: Vec::new(),
-            scopes: Vec::new(),
-            call_stack: Vec::new(),
-            functions: ir.funcs,
-            types: ir.types,
-            heap: Heap::new(),
-        };
-        vm.run(&ir.entry)
+        const STACK_SIZE: usize = 256 * 1024 * 1024;
+        std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn(move || {
+                let IrProgram {
+                    funcs,
+                    types,
+                    entry,
+                } = ir;
+                let mut vm = Vm::new();
+                vm.load(funcs, types);
+                vm.run(&entry)
+            })
+            .expect("invariant: VM worker thread spawns")
+            .join()
+            .expect("invariant: VM worker thread does not panic")
     }
 
     /// Force a full garbage-collection cycle right now. Useful for tests and
@@ -283,12 +343,14 @@ impl Vm {
                 Instr::Concat => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    self.stack.push(Value::Str(format!("{a}{b}")));
+                    let s = format!("{}{}", self.format_value(&a), self.format_value(&b));
+                    self.stack.push(Value::Str(s));
                 }
                 Instr::ConcatWs => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    self.stack.push(Value::Str(format!("{a} {b}")));
+                    let s = format!("{} {}", self.format_value(&a), self.format_value(&b));
+                    self.stack.push(Value::Str(s));
                 }
 
                 // --- variables ---
@@ -372,14 +434,7 @@ impl Vm {
                     self.stack.push(Value::Num(value.log(base)));
                 }
                 Instr::Rand => {
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
-                    use std::time::SystemTime;
-                    let mut h = DefaultHasher::new();
-                    SystemTime::now().hash(&mut h);
-                    self.stack.len().hash(&mut h);
-                    let r = (h.finish() & 0x000F_FFFF_FFFF_FFFF) as f64
-                        / 0x000F_FFFF_FFFF_FFFFu64 as f64;
+                    let r = self.next_rand();
                     self.stack.push(Value::Num(r));
                 }
 
@@ -580,11 +635,29 @@ impl Vm {
     }
 
     fn call_func_with_args(&mut self, name: &str, args: Vec<Value>) -> Result<(), VmError> {
+        // Guard against unbounded recursion before it exhausts the native
+        // stack: report a clean error instead of aborting the process.
+        if self.call_stack.len() >= self.max_call_depth {
+            return Err(VmError::StackOverflow);
+        }
+
+        // `Rc` clone of the body — a handle bump, not a copy of the bytecode.
         let func = self
             .functions
             .get(name)
             .cloned()
             .ok_or_else(|| VmError::UndefinedFunction(name.to_string()))?;
+
+        // Label table is computed once per function and memoized; recursive
+        // calls reuse the cached table instead of rescanning the body.
+        let labels = match self.label_cache.get(name) {
+            Some(l) => l.clone(),
+            None => {
+                let l = Rc::new(Self::resolve_labels(&func.body));
+                self.label_cache.insert(name.to_string(), l.clone());
+                l
+            }
+        };
 
         // Suspend the caller frame inside the VM (not as Rust locals) so its
         // objects remain GC roots while this call allocates.
@@ -599,13 +672,19 @@ impl Vm {
         }
         self.scopes.push(scope);
 
-        let labels = Self::resolve_labels(&func.body);
         let result = self.run_with_labels(&func.body, &labels);
 
         let ret_val = self.stack.pop().unwrap_or(Value::Nil);
 
-        // Restore the caller frame. No allocation happens between here and the
-        // push of `ret_val`, so `ret_val` cannot be collected meanwhile.
+        // Hand the return value back to the caller's frame *before* it leaves
+        // `call_stack`: while the frame is still suspended its stack is part of
+        // the GC root set, so `ret_val` can never be collected mid-restore even
+        // if future work here triggers a collection.
+        self.call_stack
+            .last_mut()
+            .expect("invariant: call frame balanced")
+            .stack
+            .push(ret_val);
         let frame = self
             .call_stack
             .pop()
@@ -614,8 +693,19 @@ impl Vm {
         self.stack = frame.stack;
 
         result?;
-        self.stack.push(ret_val);
         Ok(())
+    }
+
+    /// Next pseudo-random `f64` in `[0, 1)` from the xorshift64* generator.
+    fn next_rand(&mut self) -> f64 {
+        let mut x = self.rng_state;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.rng_state = x;
+        let bits = x.wrapping_mul(0x2545_F491_4F6C_DD1D);
+        // Take the top 53 bits for a uniform double in [0, 1).
+        (bits >> 11) as f64 / (1u64 << 53) as f64
     }
 
     // ── stack helpers ─────────────────────────────────────────────────────────
@@ -925,7 +1015,7 @@ mod tests {
             entry,
         };
         let mut vm = Vm::new();
-        vm.functions = ir.funcs;
+        vm.load(ir.funcs, ir.types);
         vm.run(&ir.entry).unwrap();
         assert_eq!(vm.stack, vec![Value::Num(1.0)]);
     }
@@ -1074,7 +1164,12 @@ mod tests {
     fn is_type_true_for_primitive_builtin() {
         // A.8.5: `5 is Number`, `"x" is String`, `true is Boolean` all hold.
         assert_eq!(
-            run(&[Instr::PushNum(5.0), Instr::IsType("Number".into()), Instr::Ret]).unwrap(),
+            run(&[
+                Instr::PushNum(5.0),
+                Instr::IsType("Number".into()),
+                Instr::Ret
+            ])
+            .unwrap(),
             vec![Value::Bool(true)]
         );
         assert_eq!(
@@ -1101,7 +1196,12 @@ mod tests {
     fn is_type_primitive_conforms_to_object() {
         // Every value conforms to `Object`.
         assert_eq!(
-            run(&[Instr::PushNum(5.0), Instr::IsType("Object".into()), Instr::Ret]).unwrap(),
+            run(&[
+                Instr::PushNum(5.0),
+                Instr::IsType("Object".into()),
+                Instr::Ret
+            ])
+            .unwrap(),
             vec![Value::Bool(true)]
         );
     }
@@ -1110,7 +1210,12 @@ mod tests {
     fn is_type_false_for_wrong_primitive() {
         // `5 is String` must be false.
         assert_eq!(
-            run(&[Instr::PushNum(5.0), Instr::IsType("String".into()), Instr::Ret]).unwrap(),
+            run(&[
+                Instr::PushNum(5.0),
+                Instr::IsType("String".into()),
+                Instr::Ret
+            ])
+            .unwrap(),
             vec![Value::Bool(false)]
         );
     }
@@ -1188,10 +1293,10 @@ mod tests {
         let obj = make_object_on(&mut vm, "Dog");
         vm.functions.insert(
             "__method_Dog_speak".to_string(),
-            IrFunc {
+            Rc::new(IrFunc {
                 params: vec!["self".to_string()],
                 body: speak_body,
-            },
+            }),
         );
         vm.types.insert(
             "Dog".to_string(),
@@ -1231,10 +1336,10 @@ mod tests {
         }
         vm.functions.insert(
             "__method_Box_add".to_string(),
-            IrFunc {
+            Rc::new(IrFunc {
                 params: vec!["self".to_string(), "x".to_string()],
                 body: add_body,
-            },
+            }),
         );
         vm.types.insert(
             "Box".to_string(),
@@ -1262,10 +1367,10 @@ mod tests {
         let obj = make_object_on(&mut vm, "C");
         vm.functions.insert(
             "__method_A_greet".to_string(),
-            IrFunc {
+            Rc::new(IrFunc {
                 params: vec!["self".to_string()],
                 body: greet_body,
-            },
+            }),
         );
         vm.types.insert(
             "A".to_string(),
@@ -1309,10 +1414,10 @@ mod tests {
         let obj = make_object_on(&mut vm, "Dog");
         vm.functions.insert(
             "__method_Animal_speak".to_string(),
-            IrFunc {
+            Rc::new(IrFunc {
                 params: vec!["self".to_string()],
                 body: speak_body,
-            },
+            }),
         );
         vm.types.insert(
             "Animal".to_string(),
@@ -1335,5 +1440,49 @@ mod tests {
         vm.run(&[Instr::CallMethod("speak".to_string(), 0), Instr::Ret])
             .unwrap();
         assert_eq!(vm.stack, vec![Value::Str("...".to_string())]);
+    }
+
+    #[test]
+    fn recursion_depth_limit_is_reported_cleanly() {
+        // A function that calls itself forever must surface `StackOverflow`
+        // rather than aborting the process on native stack exhaustion. The low
+        // limit keeps the native recursion shallow enough for the test thread.
+        let mut vm = Vm::new();
+        vm.set_max_call_depth(16);
+        let funcs = [(
+            "f".to_string(),
+            IrFunc {
+                params: vec![],
+                body: vec![Instr::Call("f".to_string(), 0), Instr::Ret],
+            },
+        )]
+        .into_iter()
+        .collect();
+        vm.load(funcs, HashMap::new());
+        let result = vm.run(&[Instr::Call("f".to_string(), 0), Instr::Ret]);
+        assert_eq!(result, Err(VmError::StackOverflow));
+    }
+
+    #[test]
+    fn rand_stays_in_unit_interval() {
+        let mut vm = Vm::new();
+        for _ in 0..1000 {
+            vm.run(&[Instr::Rand, Instr::Ret]).unwrap();
+            match vm.stack.pop().expect("rand pushes a value") {
+                Value::Num(r) => assert!((0.0..1.0).contains(&r), "rand out of range: {r}"),
+                other => panic!("rand produced a non-number: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn concat_renders_object_with_type_name() {
+        // `@` on an object must use the heap-aware type name, matching `print`.
+        let mut vm = Vm::new();
+        let obj = make_object_on(&mut vm, "Dog");
+        vm.stack.push(Value::Str("x=".to_string()));
+        vm.stack.push(obj);
+        vm.run(&[Instr::Concat, Instr::Ret]).unwrap();
+        assert_eq!(vm.stack, vec![Value::Str("x=<Dog object>".to_string())]);
     }
 }

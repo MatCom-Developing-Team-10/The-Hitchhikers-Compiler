@@ -1208,7 +1208,36 @@ impl Checker {
                 // `Object` (its `Range` type is a runtime-only builtin), so it
                 // falls back to `Number`, matching the IR lowering.
                 let iter_ty = self.check_expr(env, iter);
-                let elem_ty = self.iterator_element_type(&iter_ty).unwrap_or(Type::Number);
+                let elem_ty = match &iter_ty {
+                    // Poison: a prior error already fired; stay silent.
+                    Type::Error => Type::Error,
+                    // `Object` is the escape hatch for `range(...)` and other
+                    // runtime-only iterables; bind the element as `Number`.
+                    Type::Object => Type::Number,
+                    // A user type/interface is iterable only if it provides the
+                    // iterator protocol (probed via `current()`).
+                    Type::User(_) | Type::Generic(_, _) => {
+                        match self.iterator_element_type(&iter_ty) {
+                            Some(t) => t,
+                            None => {
+                                self.errors.push(SemError::NotIterable {
+                                    ty: iter_ty.name(),
+                                    span: iter.span,
+                                });
+                                Type::Error
+                            }
+                        }
+                    }
+                    // Primitives (`Number`/`String`/`Boolean`) and type params
+                    // are not iterable.
+                    _ => {
+                        self.errors.push(SemError::NotIterable {
+                            ty: iter_ty.name(),
+                            span: iter.span,
+                        });
+                        Type::Error
+                    }
+                };
                 env.enter();
                 env.define(
                     var,
