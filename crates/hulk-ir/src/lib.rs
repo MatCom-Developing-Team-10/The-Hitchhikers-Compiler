@@ -675,12 +675,24 @@ fn ancestry_chain<'a>(type_name: &str, all_types: &'a [TypeDecl]) -> Vec<&'a Typ
 
 /// Lower a type constructor. The generated IrFunc has the ctor params of
 /// `decl` as its parameter list, creates an object with `NewObject`, then
-/// initializes all inherited and own fields in ancestry order.
+/// initializes all inherited and own fields.
 ///
 /// The object is bound to the reserved local variable `__self` so that each
 /// field initializer can emit `LoadVar("__self"); SetField(name)` without
 /// needing a Dup-before-push-value trick (which would leave the value on top
 /// rather than the object).
+///
+/// **Constructor parameters are bound leaf → root.** Each `inherits Parent(args)`
+/// clause is evaluated in the scope of the *child*'s parameters: to compute a
+/// grandparent's arguments we first need the parent's parameters, which in turn
+/// depend on the leaf's. We therefore start from the leaf (whose parameters are
+/// the IrFunc parameters, already in scope) and walk upward, opening one nested
+/// scope per ancestor link so that, while initializing a given ancestor, that
+/// ancestor's parameters are the innermost — and thus visible — bindings, even
+/// when a parameter name is shared across levels. Attribute initializers only
+/// read constructor parameters (never other attributes), so the resulting
+/// leaf → root initialization order is observable only under cross-level
+/// attribute-name shadowing, which the language does not define.
 fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
     let params: Vec<String> = decl.type_params.iter().map(|p| p.name.clone()).collect();
     let mut body = Vec::new();
@@ -691,62 +703,62 @@ fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
     body.push(Instr::BeginScope);
     body.push(Instr::BindVar("__self".to_string()));
 
+    // chain[0] = root ancestor, chain[last] = `decl` itself (the leaf).
     let chain = ancestry_chain(&decl.name, all_types);
 
-    // For each ancestor (root → this type), initialize its attributes.
-    // Ancestor ctor params are re-bound in an inner scope using parent_args
-    // supplied by the next type in the chain.
-    for (i, ancestor) in chain.iter().enumerate() {
-        let is_last = i == chain.len() - 1; // last entry is the type itself
+    // The leaf's parameters are the IrFunc parameters, already in scope, so its
+    // own attributes can be initialized directly.
+    let leaf = chain[chain.len() - 1];
+    lower_attrs_into_object(&leaf.attributes, &mut body, &mut ctx);
 
-        if is_last {
-            // Own attrs: ctor params are already in scope (IrFunc params).
-            lower_attrs_into_object(&decl.attributes, &mut body, &mut ctx);
-        } else {
-            // Ancestor attrs: bind ancestor ctor params to the args provided by
-            // the child via `inherits Parent(args)`.
-            let child = chain[i + 1];
-            let ancestor_param_names: Vec<&str> = ancestor
-                .type_params
-                .iter()
-                .map(|p| p.name.as_str())
-                .collect();
+    // Walk the inheritance links leaf → root. For link `chain[k]` (child) →
+    // `chain[k - 1]` (ancestor), bind the ancestor's parameters from the child's
+    // `inherits Parent(args)` clause (whose argument expressions reference the
+    // child's parameters, visible in the enclosing scope), then initialize the
+    // ancestor's attributes with those parameters as the innermost bindings.
+    let mut open_scopes = 0;
+    for k in (1..chain.len()).rev() {
+        let child = chain[k];
+        let ancestor = chain[k - 1];
+        let ancestor_param_names: Vec<&str> = ancestor
+            .type_params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
 
-            if ancestor_param_names.is_empty() && ancestor.attributes.is_empty() {
-                continue;
-            }
+        body.push(Instr::BeginScope);
+        open_scopes += 1;
 
-            body.push(Instr::BeginScope);
-
-            if let Some(parent_spec) = &child.parent {
-                match &parent_spec.args {
-                    // Explicit args: evaluate them in the current scope.
-                    Some(explicit_args) => {
-                        for (param_name, arg_expr) in
-                            ancestor_param_names.iter().zip(explicit_args.iter())
-                        {
-                            lower_inner(arg_expr, &mut body, &mut ctx);
-                            body.push(Instr::BindVar(param_name.to_string()));
-                        }
+        if let Some(parent_spec) = &child.parent {
+            match &parent_spec.args {
+                // Explicit args: evaluate them with the child's params in scope.
+                Some(explicit_args) => {
+                    for (param_name, arg_expr) in
+                        ancestor_param_names.iter().zip(explicit_args.iter())
+                    {
+                        lower_inner(arg_expr, &mut body, &mut ctx);
+                        body.push(Instr::BindVar(param_name.to_string()));
                     }
-                    // No explicit args: forward the child's ctor params.
-                    None => {
-                        for param_name in &ancestor_param_names {
-                            body.push(Instr::LoadVar(param_name.to_string()));
-                            body.push(Instr::BindVar(param_name.to_string()));
-                        }
+                }
+                // No explicit args: forward the child's params of the same name.
+                None => {
+                    for param_name in &ancestor_param_names {
+                        body.push(Instr::LoadVar(param_name.to_string()));
+                        body.push(Instr::BindVar(param_name.to_string()));
                     }
                 }
             }
-
-            lower_attrs_into_object(&ancestor.attributes, &mut body, &mut ctx);
-            body.push(Instr::EndScope);
         }
+
+        lower_attrs_into_object(&ancestor.attributes, &mut body, &mut ctx);
     }
 
-    // Return the constructed object.
+    // Return the constructed object, closing every ancestor scope plus __self.
     body.push(Instr::LoadVar("__self".to_string()));
-    body.push(Instr::EndScope);
+    for _ in 0..open_scopes {
+        body.push(Instr::EndScope);
+    }
+    body.push(Instr::EndScope); // __self scope
     body.push(Instr::Ret);
     IrFunc { params, body }
 }
@@ -1333,5 +1345,85 @@ mod tests {
         assert_eq!(ctor.params, vec!["x"]);
         assert!(ctor.body.contains(&Instr::NewObject("Point".to_string())));
         assert!(ctor.body.contains(&Instr::SetField("x".to_string())));
+    }
+
+    #[test]
+    fn constructor_binds_intermediate_params_before_grandparent_args() {
+        // Regression: with a 3-level chain A <- B <- C where each `inherits`
+        // forwards a computed argument, the intermediate type's parameter must
+        // be bound before it is read to compute the grandparent's argument.
+        //
+        // type A(a) { a = a; }
+        // type B(b) inherits A(b + 100) { }
+        // type C(c) inherits B(c + 10) { }
+        use hulk_ast::{AttrDecl, Param, ParentSpec, TypeDecl};
+
+        let param = |name: &str| Param {
+            name: name.to_string(),
+            ty: None,
+            span: Span::default(),
+        };
+        let inherits = |name: &str, arg: Expr| {
+            Some(ParentSpec {
+                name: name.to_string(),
+                args: Some(vec![arg]),
+                span: Span::default(),
+            })
+        };
+        let ty = |name: &str, p: &str, parent, attrs| TypeDecl {
+            name: name.to_string(),
+            generic_params: vec![],
+            type_params: vec![param(p)],
+            parent,
+            implements: vec![],
+            attributes: attrs,
+            methods: vec![],
+            span: Span::default(),
+        };
+
+        let program = Program {
+            interfaces: vec![],
+            types: vec![
+                ty(
+                    "A",
+                    "a",
+                    None,
+                    vec![AttrDecl {
+                        name: "a".to_string(),
+                        ty: None,
+                        init: ident("a"),
+                        span: Span::default(),
+                    }],
+                ),
+                ty(
+                    "B",
+                    "b",
+                    inherits("A", binop(BinOp::Add, ident("b"), num(100.0))),
+                    vec![],
+                ),
+                ty(
+                    "C",
+                    "c",
+                    inherits("B", binop(BinOp::Add, ident("c"), num(10.0))),
+                    vec![],
+                ),
+            ],
+            functions: vec![],
+            entry: num(0.0),
+        };
+
+        let ir = lower_program(&program);
+        let ctor = &ir.funcs["__ctor_C"];
+        let pos = |needle: &Instr| ctor.body.iter().position(|i| i == needle);
+
+        // `b` is bound (from C's `inherits B(c + 10)`) before it is loaded to
+        // compute A's argument (`b + 100`). Before the fix, A was initialized
+        // first, so `LoadVar("b")` preceded `BindVar("b")` and `b` was undefined.
+        let bind_b = pos(&Instr::BindVar("b".to_string())).expect("binds intermediate param b");
+        let load_b = pos(&Instr::LoadVar("b".to_string())).expect("loads b for A's argument");
+        assert!(
+            bind_b < load_b,
+            "intermediate param `b` must be bound before A's argument reads it"
+        );
     }
 }

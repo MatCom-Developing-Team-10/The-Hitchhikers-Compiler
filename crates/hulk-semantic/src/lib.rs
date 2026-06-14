@@ -16,7 +16,7 @@
 //!
 //! ## Pipeline
 //!
-//! Three passes plus an override-identity check, all sharing a single mutable
+//! Four passes plus an override-identity check, all sharing a single mutable
 //! [`Checker`]:
 //!
 //! 1. `collect` — register every type name; reject duplicate types,
@@ -26,9 +26,13 @@
 //!    this pass the global signature environment is
 //!    complete (HULK spec A.3 — "any function can call
 //!    any other regardless of declaration order").
-//! 3. `check_overrides` — `T.m` and `Parent.m` must have identical signatures
+//! 3. `infer_returns` — infer the return type of every function/method that
+//!    lacks an explicit annotation by walking its body to a
+//!    fixpoint, so un-annotated returns are usable in typed
+//!    contexts (e.g. arithmetic) instead of defaulting to `Object`.
+//! 4. `check_overrides` — `T.m` and `Parent.m` must have identical signatures
 //!    (HULK spec A.7.4 — "the exact same signature").
-//! 4. `check_bodies` — walk every function/method/attribute body and the
+//! 5. `check_bodies` — walk every function/method/attribute body and the
 //!    program's entry expression, propagating types and
 //!    accumulating diagnostics.
 //!

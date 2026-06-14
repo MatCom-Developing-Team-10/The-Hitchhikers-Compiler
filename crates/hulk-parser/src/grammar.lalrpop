@@ -455,33 +455,37 @@ AddExpr: Expr = {
 
 // Level 8: multiplication / division / modulo (left-associative)
 MulExpr: Expr = {
-    <lo:@L> <lhs:MulExpr> "*" <rhs:PowExpr> <hi:@R> => {
+    <lo:@L> <lhs:MulExpr> "*" <rhs:UnaryExpr> <hi:@R> => {
         Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Mul, Box::new(lhs), Box::new(rhs)) }
     },
-    <lo:@L> <lhs:MulExpr> "/" <rhs:PowExpr> <hi:@R> => {
+    <lo:@L> <lhs:MulExpr> "/" <rhs:UnaryExpr> <hi:@R> => {
         Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Div, Box::new(lhs), Box::new(rhs)) }
     },
-    <lo:@L> <lhs:MulExpr> "%" <rhs:PowExpr> <hi:@R> => {
+    <lo:@L> <lhs:MulExpr> "%" <rhs:UnaryExpr> <hi:@R> => {
         Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Mod, Box::new(lhs), Box::new(rhs)) }
-    },
-    PowExpr,
-};
-
-// Level 9: power (right-associative). Both `^` and `**` are accepted per spec.
-PowExpr: Expr = {
-    <lo:@L> <base:UnaryExpr> "^" <exp:PowExpr> <hi:@R> => {
-        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
-    },
-    <lo:@L> <base:UnaryExpr> "**" <exp:PowExpr> <hi:@R> => {
-        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
     },
     UnaryExpr,
 };
 
-// Level 10: unary prefix (negation)
+// Level 9: unary prefix (negation). Binds looser than power so that `-2 ^ 2`
+// parses as `-(2 ^ 2)` (the mathematical convention), while still binding
+// tighter than `*`/`/`/`%` so that `2 * -3` is `2 * (-3)`.
 UnaryExpr: Expr = {
     <lo:@L> "-" <e:UnaryExpr> <hi:@R> => {
         Expr { span: Span::new(lo, hi), kind: ExprKind::UnOp(UnOp::Neg, Box::new(e)) }
+    },
+    PowExpr,
+};
+
+// Level 10: power (right-associative). Both `^` and `**` are accepted per spec.
+// The base is a postfix expression; the exponent is a unary expression, so a
+// negated exponent (`2 ^ -1`) and right chaining (`2 ^ 3 ^ 4`) both parse.
+PowExpr: Expr = {
+    <lo:@L> <base:PostfixExpr> "^" <exp:UnaryExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
+    },
+    <lo:@L> <base:PostfixExpr> "**" <exp:UnaryExpr> <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) }
     },
     PostfixExpr,
 };

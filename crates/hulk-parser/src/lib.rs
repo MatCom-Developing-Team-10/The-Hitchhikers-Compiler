@@ -82,6 +82,39 @@ mod tests {
     }
 
     #[test]
+    fn unary_minus_binds_looser_than_power() {
+        // -2 ^ 2 should parse as -(2 ^ 2), not (-2) ^ 2.
+        let prog = parse("-2 ^ 2;").unwrap();
+        if let ExprKind::UnOp(UnOp::Neg, inner) = &prog.entry.kind {
+            assert!(matches!(inner.kind, ExprKind::BinOp(BinOp::Pow, _, _)));
+        } else {
+            panic!("expected unary Neg wrapping a Pow");
+        }
+    }
+
+    #[test]
+    fn unary_minus_binds_tighter_than_multiplication() {
+        // 2 * -3 should parse as 2 * (-3).
+        let prog = parse("2 * -3;").unwrap();
+        if let ExprKind::BinOp(BinOp::Mul, _lhs, rhs) = &prog.entry.kind {
+            assert!(matches!(rhs.kind, ExprKind::UnOp(UnOp::Neg, _)));
+        } else {
+            panic!("expected Mul with a negated right operand");
+        }
+    }
+
+    #[test]
+    fn negated_exponent_parses() {
+        // 2 ^ -1 should parse with a negated exponent.
+        let prog = parse("2 ^ -1;").unwrap();
+        if let ExprKind::BinOp(BinOp::Pow, _base, exp) = &prog.entry.kind {
+            assert!(matches!(exp.kind, ExprKind::UnOp(UnOp::Neg, _)));
+        } else {
+            panic!("expected Pow with a negated exponent");
+        }
+    }
+
+    #[test]
     fn parses_double_star_as_power() {
         // `**` is an alias for `^` per spec example in A.3.1
         let prog = parse("2 ** 3;").unwrap();

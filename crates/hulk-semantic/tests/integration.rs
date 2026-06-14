@@ -559,3 +559,144 @@ fn reserved_let_binder_names_are_rejected() {
             .any(|x| matches!(x, SemError::ReservedName { .. }))
     );
 }
+
+// ---------- return-type inference (no explicit annotation) ----------
+
+fn func(name: &str, params: Vec<&str>, body: Expr) -> FunctionDecl {
+    FunctionDecl {
+        name: name.into(),
+        generic_params: vec![],
+        params: params
+            .into_iter()
+            .map(|p| Param {
+                name: p.into(),
+                ty: None,
+                span: Span::default(),
+            })
+            .collect(),
+        return_ty: None,
+        body,
+        span: Span::default(),
+    }
+}
+
+#[test]
+fn unannotated_function_return_is_inferred_for_arithmetic() {
+    // function f() => 5; print(f() + 1)
+    // Without return inference, `f` defaults to Object and `f() + 1` fails.
+    let mut p = prog(call(
+        "print",
+        vec![binop(BinOp::Add, call("f", vec![]), n(1.0))],
+    ));
+    p.functions = vec![func("f", vec![], n(5.0))];
+    assert!(analyze(&p).is_ok(), "f() should infer Number return");
+}
+
+#[test]
+fn unannotated_mutually_recursive_returns_infer_to_fixpoint() {
+    // function g() => f(); function f() => 5; print(g() + 1)
+    // `g` depends on `f`'s inferred return; the fixpoint must propagate Number.
+    let mut p = prog(call(
+        "print",
+        vec![binop(BinOp::Add, call("g", vec![]), n(1.0))],
+    ));
+    p.functions = vec![
+        func("g", vec![], call("f", vec![])),
+        func("f", vec![], n(5.0)),
+    ];
+    assert!(analyze(&p).is_ok(), "g()'s return should resolve to Number");
+}
+
+#[test]
+fn unannotated_method_return_is_inferred_for_arithmetic() {
+    // type A() { val() => 5; }  print(new A().val() + 1)
+    let method = MethodDecl {
+        name: "val".into(),
+        params: vec![],
+        return_ty: None,
+        body: n(5.0),
+        span: Span::default(),
+    };
+    let ty = TypeDecl {
+        name: "A".into(),
+        generic_params: vec![],
+        type_params: vec![],
+        parent: None,
+        implements: vec![],
+        attributes: vec![],
+        methods: vec![method],
+        span: Span::default(),
+    };
+    let mut p = prog(call(
+        "print",
+        vec![binop(
+            BinOp::Add,
+            e(ExprKind::MethodCall(
+                Box::new(e(ExprKind::New("A".into(), vec![], vec![]))),
+                "val".into(),
+                vec![],
+            )),
+            n(1.0),
+        )],
+    ));
+    p.types = vec![ty];
+    assert!(analyze(&p).is_ok(), "A.val() should infer Number return");
+}
+
+// ---------- for-loop element typing ----------
+
+#[test]
+fn for_loop_binds_element_type_from_current_method() {
+    // type Foo() { bar(): Number => 1; }
+    // type FooIter() {
+    //     hasNext(): Boolean => true;
+    //     current(): Foo => new Foo();
+    //     next(): Foo => new Foo();
+    // }
+    // for (f in new FooIter()) f.bar();   // ok iff f : Foo
+    let method = |name: &str, ret: &str, body: Expr| MethodDecl {
+        name: name.into(),
+        params: vec![],
+        return_ty: Some(TypeRef::Simple(ret.into())),
+        body,
+        span: Span::default(),
+    };
+    let new = |t: &str| e(ExprKind::New(t.into(), vec![], vec![]));
+    let decl = |name: &str, methods: Vec<MethodDecl>| TypeDecl {
+        name: name.into(),
+        generic_params: vec![],
+        type_params: vec![],
+        parent: None,
+        implements: vec![],
+        attributes: vec![],
+        methods,
+        span: Span::default(),
+    };
+
+    let foo = decl("Foo", vec![method("bar", "Number", n(1.0))]);
+    let foo_iter = decl(
+        "FooIter",
+        vec![
+            method("hasNext", "Boolean", b(true)),
+            method("current", "Foo", new("Foo")),
+            method("next", "Foo", new("Foo")),
+        ],
+    );
+
+    let mut p = prog(e(ExprKind::For(
+        "f".into(),
+        Box::new(new("FooIter")),
+        Box::new(e(ExprKind::MethodCall(
+            Box::new(id("f")),
+            "bar".into(),
+            vec![],
+        ))),
+    )));
+    p.types = vec![foo, foo_iter];
+    // If the loop var were typed `Number` (the old behaviour), `f.bar()` would
+    // raise `NoSuchMethod`; success proves it binds to `current()`'s return.
+    assert!(
+        analyze(&p).is_ok(),
+        "loop var should bind to Foo, the return type of current()"
+    );
+}
