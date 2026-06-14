@@ -275,8 +275,8 @@ De **mayor** a **menor** precedencia:
 |-------|-----------|----------------------------|---------------|
 | 12 | Atomos | Literales, `self`, `new`, identificadores, `(expr)` | — |
 | 11 | Postfix | `.field`, `.method(args)` | Izquierda |
-| 10 | Unario | `-expr`, `!expr` | Derecha |
-| 9 | Potencia | `^` | **Derecha** |
+| 10 | Potencia | `^`, `**` | **Derecha** |
+| 9 | Unario | `-expr` | Derecha |
 | 8 | Multiplicativo | `*`, `/`, `%` | Izquierda |
 | 7 | Aditivo | `+`, `-` | Izquierda |
 | 6 | Concatenacion | `@`, `@@` | **Derecha** |
@@ -288,6 +288,8 @@ De **mayor** a **menor** precedencia:
 | 0 | Top-level | `let`, `:=`, control flow, expresiones binarias | — |
 
 **Nota:** El control de flujo (`if`, `while`, `for`, bloques) puede anidarse directamente a nivel 0. Para usarlo como operando de un operador binario, se necesitan parentesis: `(if (c) 1 else 2) + 3`.
+
+**Nota:** La potencia liga mas fuerte que la negacion unaria, siguiendo la convencion matematica: `-2 ^ 2` se interpreta como `-(2 ^ 2) = -4`, no `(-2) ^ 2`. La negacion sigue ligando mas fuerte que `*`/`/`/`%`, de modo que `2 * -3` es `2 * (-3)`. Como el exponente admite un operando unario, `2 ^ -1` es valido.
 
 ---
 

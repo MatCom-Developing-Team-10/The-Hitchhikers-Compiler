@@ -718,6 +718,34 @@ impl Checker {
         self.lookup_inherited_attr(&info.parent, name)
     }
 
+    /// Element type produced by iterating `iter_ty`: the (substituted) return
+    /// type of its `current()` method. Returns `None` when the type is not a
+    /// user type/interface or does not provide `current()` (e.g. `range`'s
+    /// runtime-only `Range`), letting the caller fall back to `Number`.
+    fn iterator_element_type(&self, iter_ty: &Type) -> Option<Type> {
+        let (name, subst) = match iter_ty {
+            Type::User(n) => (n.clone(), HashMap::new()),
+            Type::Generic(n, targs) => {
+                let info_params = if self.ctx.is_interface(n) {
+                    self.ctx.interfaces.get(n).map(|i| &i.generic_params)
+                } else {
+                    self.ctx.types.get(n).map(|i| &i.generic_params)
+                };
+                let subst: HashMap<String, Type> = info_params
+                    .map(|gp| gp.iter().cloned().zip(targs.iter().cloned()).collect())
+                    .unwrap_or_default();
+                (n.clone(), subst)
+            }
+            _ => return None,
+        };
+        let sig = if self.ctx.is_interface(&name) {
+            self.lookup_interface_method(&name, "current")
+        } else {
+            self.lookup_inherited_method(&name, "current")
+        }?;
+        Some(self.ctx.substitute(&sig.returns, &subst))
+    }
+
     /// Resolve the effective constructor parameter types for `T`, following
     /// the forwarding rule from A.7.3 (no own `type_params` and no explicit
     /// `inherits Parent(...)` arg list ⇒ use the parent's effective ctor).
@@ -1175,15 +1203,17 @@ impl Checker {
             }
 
             ExprKind::For(var, iter, body) => {
-                // The iterable protocol is not yet modelled. We bind `var` to
-                // `Number` (matches `range(...)`); generic iterables will
-                // require extending `TypeCtx` with a `Protocol` notion.
-                let _ = self.check_expr(env, iter);
+                // The loop variable takes the element type of the iterator: the
+                // return type of its `current()` method. `range(...)` is typed as
+                // `Object` (its `Range` type is a runtime-only builtin), so it
+                // falls back to `Number`, matching the IR lowering.
+                let iter_ty = self.check_expr(env, iter);
+                let elem_ty = self.iterator_element_type(&iter_ty).unwrap_or(Type::Number);
                 env.enter();
                 env.define(
                     var,
                     Binding {
-                        ty: Type::Number,
+                        ty: elem_ty,
                         span: e.span,
                     },
                 );

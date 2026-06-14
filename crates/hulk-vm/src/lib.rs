@@ -46,6 +46,10 @@ pub enum VmError {
     /// AsType assertion failed.
     #[error("cannot cast {from} to {to}")]
     InvalidCast { from: String, to: String },
+    /// A jump targeted a label that does not exist in the current code block.
+    /// Signals malformed bytecode (an IR-lowering bug) rather than a user error.
+    #[error("internal error: jump to undefined label `{0}`")]
+    UndefinedLabel(String),
 }
 
 // ── VM ────────────────────────────────────────────────────────────────────────
@@ -318,7 +322,7 @@ impl Vm {
                 Instr::Jump(label) => {
                     ip = *labels
                         .get(label.as_str())
-                        .unwrap_or_else(|| panic!("jump to undefined label: {label}"));
+                        .ok_or_else(|| VmError::UndefinedLabel(label.clone()))?;
                     continue;
                 }
                 Instr::JumpIfFalse(label) => {
@@ -326,7 +330,7 @@ impl Vm {
                     if !cond {
                         ip = *labels
                             .get(label.as_str())
-                            .unwrap_or_else(|| panic!("jump to undefined label: {label}"));
+                            .ok_or_else(|| VmError::UndefinedLabel(label.clone()))?;
                         continue;
                     }
                 }
