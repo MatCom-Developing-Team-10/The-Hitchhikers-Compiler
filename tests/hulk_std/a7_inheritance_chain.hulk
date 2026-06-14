@@ -1,0 +1,17 @@
+// A.7.3 — Multi-level inheritance with chained constructor arguments.
+// Regression guard: each `inherits Parent(args)` is evaluated in the scope of
+// the child's parameters, so a grandparent's argument (computed from the
+// intermediate parent's parameter) must resolve correctly. The previous
+// constructor lowering evaluated ancestors root->leaf, leaving intermediate
+// parameters unbound ("undefined variable") at runtime.
+type A(a: Number) {
+    a: Number = a;
+    getA(): Number => self.a;
+}
+
+type B(b: Number) inherits A(b + 100) { }
+
+type C(c: Number) inherits B(c + 10) { }
+
+// new C(1) => B receives 1 + 10 = 11 => A receives 11 + 100 = 111.
+print(new C(1).getA());

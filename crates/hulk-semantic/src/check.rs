@@ -219,9 +219,12 @@ impl Checker {
                 .iter()
                 .map(|p| self.resolve_or_default(p.ty.as_ref(), &scope, p.span))
                 .collect();
+            // No annotation: leave a sentinel to be filled by `infer_returns`.
+            // `Type::Error` acts as a wildcard in `lca`/`conforms`, so a
+            // self-recursive body converges to its non-recursive branch's type.
             let returns = match &f.return_ty {
                 Some(tref) => self.resolve_or_default(Some(tref), &scope, f.span),
-                None => Type::Object,
+                None => Type::Error,
             };
             self.ctx.funcs.insert(
                 f.name.clone(),
@@ -299,9 +302,10 @@ impl Checker {
                     .iter()
                     .map(|p| self.resolve_or_default(p.ty.as_ref(), &scope, p.span))
                     .collect();
+                // No annotation: sentinel filled later by `infer_returns`.
                 let returns = match &m.return_ty {
                     Some(tref) => self.resolve_or_default(Some(tref), &scope, m.span),
-                    None => Type::Object,
+                    None => Type::Error,
                 };
                 methods.insert(
                     m.name.clone(),
@@ -419,6 +423,140 @@ impl Checker {
                 }
             },
             None => Type::Object,
+        }
+    }
+
+    // ------------------------------------------ pass 2.2: return inference
+    //
+    // Fill in the return type of every function and type method that lacks an
+    // explicit annotation by walking its body. Runs to a fixpoint so that
+    // mutually-dependent inferences settle: each un-annotated return starts as
+    // the `Type::Error` sentinel (set in `sign`), which behaves as a wildcard in
+    // `lca`/`conforms`. Errors raised while inferring are discarded — they are
+    // re-reported with full context by `check_bodies`.
+    pub fn infer_returns(&mut self, prog: &Program) {
+        // Each iteration resolves at least one further dependency level, so an
+        // acyclic dependency graph reaches its fixpoint within this bound.
+        let inferable = prog
+            .functions
+            .iter()
+            .filter(|f| f.return_ty.is_none())
+            .count()
+            + prog
+                .types
+                .iter()
+                .flat_map(|t| &t.methods)
+                .filter(|m| m.return_ty.is_none())
+                .count();
+        let max_iters = inferable + 1;
+
+        for _ in 0..max_iters {
+            let mut changed = false;
+
+            for f in &prog.functions {
+                if f.return_ty.is_some() {
+                    continue;
+                }
+                let Some(sig) = self.ctx.funcs.get(&f.name).cloned() else {
+                    continue;
+                };
+                let saved_errors = self.errors.len();
+                let saved_scope =
+                    std::mem::replace(&mut self.current_generic_scope, f.generic_params.clone());
+                let mut env = Env::new();
+                for (p, pt) in f.params.iter().zip(sig.params.iter()) {
+                    env.define(
+                        &p.name,
+                        Binding {
+                            ty: pt.clone(),
+                            span: p.span,
+                        },
+                    );
+                }
+                let inferred = self.check_expr(&mut env, &f.body);
+                self.errors.truncate(saved_errors);
+                self.current_generic_scope = saved_scope;
+                if let Some(sig) = self.ctx.funcs.get_mut(&f.name) {
+                    if sig.returns != inferred {
+                        sig.returns = inferred;
+                        changed = true;
+                    }
+                }
+            }
+
+            for td in &prog.types {
+                let self_ty = if td.generic_params.is_empty() {
+                    Type::User(td.name.clone())
+                } else {
+                    Type::Generic(
+                        td.name.clone(),
+                        td.generic_params
+                            .iter()
+                            .map(|p| Type::Param(p.clone()))
+                            .collect(),
+                    )
+                };
+                for m in &td.methods {
+                    if m.return_ty.is_some() {
+                        continue;
+                    }
+                    let Some(sig) = self
+                        .ctx
+                        .types
+                        .get(&td.name)
+                        .and_then(|i| i.methods.get(&m.name))
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    let saved_errors = self.errors.len();
+                    let saved_scope = std::mem::replace(
+                        &mut self.current_generic_scope,
+                        td.generic_params.clone(),
+                    );
+                    let saved_method = self.current_method.take();
+                    let mut env = Env::new();
+                    env.define(
+                        "self",
+                        Binding {
+                            ty: self_ty.clone(),
+                            span: m.span,
+                        },
+                    );
+                    for (p, pt) in m.params.iter().zip(sig.params.iter()) {
+                        env.define(
+                            &p.name,
+                            Binding {
+                                ty: pt.clone(),
+                                span: p.span,
+                            },
+                        );
+                    }
+                    self.current_method = Some(MethodScope {
+                        owner: td.name.clone(),
+                        name: m.name.clone(),
+                    });
+                    let inferred = self.check_expr(&mut env, &m.body);
+                    self.current_method = saved_method;
+                    self.errors.truncate(saved_errors);
+                    self.current_generic_scope = saved_scope;
+                    if let Some(msig) = self
+                        .ctx
+                        .types
+                        .get_mut(&td.name)
+                        .and_then(|i| i.methods.get_mut(&m.name))
+                    {
+                        if msig.returns != inferred {
+                            msig.returns = inferred;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            if !changed {
+                break;
+            }
         }
     }
 
@@ -1260,6 +1398,7 @@ pub fn analyze(prog: &Program) -> Result<TypeCtx, Vec<SemError>> {
     let mut c = Checker::new();
     c.collect(prog);
     c.sign(prog);
+    c.infer_returns(prog);
     c.check_interfaces(prog);
     c.check_overrides(prog);
     c.check_bodies(prog);
