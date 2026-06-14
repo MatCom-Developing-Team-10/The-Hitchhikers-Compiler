@@ -466,36 +466,24 @@ impl Vm {
                 // Runtime type test: push bool.
                 Instr::IsType(target) => {
                     let val = self.pop()?;
-                    let result = match &val {
-                        Value::Object(id) => {
-                            let runtime_type = self.heap.get(*id).type_name.clone();
-                            self.conforms(&runtime_type, target)
-                        }
-                        _ => false,
-                    };
+                    let result = self.value_conforms(&val, target);
                     self.stack.push(Value::Bool(result));
                 }
 
                 // Runtime type assertion.
                 Instr::AsType(target) => {
                     let val = self.pop()?;
-                    match &val {
-                        Value::Object(id) => {
-                            let runtime_type = self.heap.get(*id).type_name.clone();
-                            if !self.conforms(&runtime_type, target) {
-                                return Err(VmError::InvalidCast {
-                                    from: runtime_type,
-                                    to: target.clone(),
-                                });
-                            }
-                            self.stack.push(val);
-                        }
-                        other => {
-                            return Err(VmError::InvalidCast {
-                                from: other.type_name().to_string(),
-                                to: target.clone(),
-                            });
-                        }
+                    if self.value_conforms(&val, target) {
+                        self.stack.push(val);
+                    } else {
+                        let from = match &val {
+                            Value::Object(id) => self.heap.get(*id).type_name.clone(),
+                            other => other.type_name().to_string(),
+                        };
+                        return Err(VmError::InvalidCast {
+                            from,
+                            to: target.clone(),
+                        });
                     }
                 }
             }
@@ -522,6 +510,25 @@ impl Vm {
             } else {
                 return Err(VmError::UndefinedMethod(method_name.to_string()));
             }
+        }
+    }
+
+    /// Return `true` if `val`'s runtime type conforms to `target`, the name
+    /// used by an `is`/`as` operation.
+    ///
+    /// Primitives report their builtin type name (`Number`/`String`/`Boolean`)
+    /// and every value conforms to `Object`, so `5 is Number`, `"x" is String`
+    /// and `obj is Object` all hold (A.8.5/A.8.6). `Nil` conforms to nothing.
+    fn value_conforms(&self, val: &Value, target: &str) -> bool {
+        match val {
+            Value::Object(id) => {
+                let runtime_type = &self.heap.get(*id).type_name;
+                target == "Object" || self.conforms(runtime_type, target)
+            }
+            Value::Num(_) => target == "Number" || target == "Object",
+            Value::Str(_) => target == "String" || target == "Object",
+            Value::Bool(_) => target == "Boolean" || target == "Object",
+            Value::Nil => false,
         }
     }
 
@@ -1061,6 +1068,73 @@ mod tests {
         ];
         let stack = run(&instrs).unwrap();
         assert_eq!(stack, vec![Value::Bool(false)]);
+    }
+
+    #[test]
+    fn is_type_true_for_primitive_builtin() {
+        // A.8.5: `5 is Number`, `"x" is String`, `true is Boolean` all hold.
+        assert_eq!(
+            run(&[Instr::PushNum(5.0), Instr::IsType("Number".into()), Instr::Ret]).unwrap(),
+            vec![Value::Bool(true)]
+        );
+        assert_eq!(
+            run(&[
+                Instr::PushStr("x".into()),
+                Instr::IsType("String".into()),
+                Instr::Ret
+            ])
+            .unwrap(),
+            vec![Value::Bool(true)]
+        );
+        assert_eq!(
+            run(&[
+                Instr::PushBool(true),
+                Instr::IsType("Boolean".into()),
+                Instr::Ret
+            ])
+            .unwrap(),
+            vec![Value::Bool(true)]
+        );
+    }
+
+    #[test]
+    fn is_type_primitive_conforms_to_object() {
+        // Every value conforms to `Object`.
+        assert_eq!(
+            run(&[Instr::PushNum(5.0), Instr::IsType("Object".into()), Instr::Ret]).unwrap(),
+            vec![Value::Bool(true)]
+        );
+    }
+
+    #[test]
+    fn is_type_false_for_wrong_primitive() {
+        // `5 is String` must be false.
+        assert_eq!(
+            run(&[Instr::PushNum(5.0), Instr::IsType("String".into()), Instr::Ret]).unwrap(),
+            vec![Value::Bool(false)]
+        );
+    }
+
+    #[test]
+    fn as_type_succeeds_for_primitive_builtin() {
+        // A.8.6: `5 as Number` returns the same value rather than failing.
+        let stack = run(&[
+            Instr::PushNum(5.0),
+            Instr::AsType("Number".into()),
+            Instr::Ret,
+        ])
+        .unwrap();
+        assert_eq!(stack, vec![Value::Num(5.0)]);
+    }
+
+    #[test]
+    fn as_type_fails_for_wrong_primitive() {
+        let result = run(&[
+            Instr::PushNum(5.0),
+            Instr::AsType("String".into()),
+            Instr::Ret,
+        ]);
+        assert!(matches!(result, Err(VmError::InvalidCast { .. })));
     }
 
     #[test]
