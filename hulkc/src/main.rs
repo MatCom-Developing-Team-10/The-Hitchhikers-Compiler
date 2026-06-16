@@ -195,7 +195,13 @@ fn report_parse_error(source: &str, err: ParseError<'_>) -> ! {
         }
         ParseError::InvalidToken { location } => {
             let (line, col) = line_col(source, *location);
-            (line, col, "SYNTACTIC", EXIT_SYNTACTIC, "invalid token".to_string())
+            (
+                line,
+                col,
+                "SYNTACTIC",
+                EXIT_SYNTACTIC,
+                "invalid token".to_string(),
+            )
         }
         ParseError::UnrecognizedEof { location, expected } => {
             let (line, col) = line_col(source, *location);
@@ -206,15 +212,20 @@ fn report_parse_error(source: &str, err: ParseError<'_>) -> ! {
             let (lo, _tok, hi) = token;
             let (line, col) = line_col(source, *lo);
             let snippet = source.get(*lo..(*hi).min(source.len())).unwrap_or("");
-            let message =
-                format!("unexpected token {snippet:?}{}", expected_suffix(expected));
+            let message = format!("unexpected token {snippet:?}{}", expected_suffix(expected));
             (line, col, "SYNTACTIC", EXIT_SYNTACTIC, message)
         }
         ParseError::ExtraToken { token } => {
             let (lo, _tok, hi) = token;
             let (line, col) = line_col(source, *lo);
             let snippet = source.get(*lo..(*hi).min(source.len())).unwrap_or("");
-            (line, col, "SYNTACTIC", EXIT_SYNTACTIC, format!("extra token {snippet:?}"))
+            (
+                line,
+                col,
+                "SYNTACTIC",
+                EXIT_SYNTACTIC,
+                format!("extra token {snippet:?}"),
+            )
         }
     };
 
