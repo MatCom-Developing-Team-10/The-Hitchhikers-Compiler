@@ -29,6 +29,11 @@ const EXIT_SEMANTIC: i32 = 3;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        // Subcommands (check these first to avoid confusion with filenames)
+        Some("run") => match args.get(2) {
+            Some(file) => cmd_compile(file),
+            None => usage_error(),
+        },
         Some("exec") => {
             let target = args.get(2).map(String::as_str).unwrap_or("-");
             cmd_exec(target);
@@ -37,6 +42,7 @@ fn main() {
             Some(file) => cmd_parse(file),
             None => usage_error(),
         },
+        // Public interface (matcom/compilers): ./hulk <file>
         Some(file) if !file.starts_with('-') => cmd_compile(file),
         _ => usage_error(),
     }
