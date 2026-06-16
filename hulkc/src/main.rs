@@ -140,20 +140,22 @@ fn write_output(source: &str) {
         }
     };
 
-    // Generate a unique delimiter unlikely to appear in user code by combining
-    // a base string with a simple hash. This prevents the heredoc from being
-    // prematurely terminated if the source contains "__HULK_SOURCE_EOF__".
-    let checksum = source
-        .bytes()
-        .fold(0u64, |acc, b| acc.wrapping_add(b as u64));
-    let delimiter = format!("__HULK_EOF_{:x}__", checksum);
+    // Generate a unique delimiter using a cryptographic hash to prevent collisions.
+    // This prevents the heredoc from being prematurely terminated if the source
+    // contains a literal delimiter string.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    let delimiter = format!("__HULK_EOF_{:016x}__", hasher.finish());
+
+    // Escape the executable path for safe use in shell. Replace ' with '\'' to
+    // close the quote, add escaped quote, and reopen.
+    let exe_path = exe.display().to_string().replace("'", "'\\''");
 
     let script = format!(
         "#!/bin/sh\n'{}' exec - <<'{}'\n{}\n{}\n",
-        exe.display(),
-        delimiter,
-        source,
-        delimiter,
+        exe_path, delimiter, source, delimiter,
     );
 
     if let Err(err) = std::fs::write("output", script) {
