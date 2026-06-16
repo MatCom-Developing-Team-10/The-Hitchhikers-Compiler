@@ -140,10 +140,20 @@ fn write_output(source: &str) {
         }
     };
 
+    // Generate a unique delimiter unlikely to appear in user code by combining
+    // a base string with a simple hash. This prevents the heredoc from being
+    // prematurely terminated if the source contains "__HULK_SOURCE_EOF__".
+    let checksum = source
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_add(b as u64));
+    let delimiter = format!("__HULK_EOF_{:x}__", checksum);
+
     let script = format!(
-        "#!/bin/sh\n'{}' exec - <<'__HULK_SOURCE_EOF__'\n{}\n__HULK_SOURCE_EOF__\n",
+        "#!/bin/sh\n'{}' exec - <<'{}'\n{}\n{}\n",
         exe.display(),
+        delimiter,
         source,
+        delimiter,
     );
 
     if let Err(err) = std::fs::write("output", script) {
