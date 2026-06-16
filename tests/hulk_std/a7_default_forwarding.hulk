@@ -1,0 +1,20 @@
+// A.7.3 — default constructor-parameter forwarding (PolarPoint inherits Point).
+// A child with no own type params and no explicit `inherits Parent(args)` clause
+// implicitly inherits its parent's constructor parameters.
+type Point(x: Number, y: Number) {
+    px: Number = x;
+    py: Number = y;
+    getX(): Number => self.px;
+    getY(): Number => self.py;
+}
+type PolarPoint inherits Point {
+    rho(): Number => sqrt(self.getX() ^ 2 + self.getY() ^ 2);
+}
+// Multi-level default forwarding: C -> B -> A all forward A's single parameter.
+type A(v: Number) { av: Number = v; get(): Number => self.av; }
+type B inherits A { }
+type C inherits B { }
+{
+    print(new PolarPoint(3, 4).rho());  // 5
+    print(new C(42).get());             // 42
+}

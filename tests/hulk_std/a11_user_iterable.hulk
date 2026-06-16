@@ -1,0 +1,12 @@
+// A.11 — Iterable protocol: `next(): Boolean` advances the cursor and reports
+// whether a current element exists, `current()` returns it. A user-defined
+// iterable that follows this protocol must work with `for`. Before the fix the
+// `for` lowering required a `hasNext()` method and this crashed at runtime with
+// `undefined method: hasNext`.
+type Countdown(n: Number) {
+    cur = n + 1;
+    next(): Boolean => (self.cur := self.cur - 1) > 0;
+    current(): Number => self.cur;
+}
+
+for (x in new Countdown(3)) print(x);

@@ -287,7 +287,7 @@ De **mayor** a **menor** precedencia:
 | 1 | OR logico | `\|` | Izquierda |
 | 0 | Top-level | `let`, `:=`, control flow, expresiones binarias | — |
 
-**Nota:** El control de flujo (`if`, `while`, `for`, bloques) puede anidarse directamente a nivel 0. Para usarlo como operando de un operador binario, se necesitan parentesis: `(if (c) 1 else 2) + 3`.
+**Nota:** El control de flujo (`if`, `while`, `for`, bloques) y la asignacion destructiva (`:=`) pueden anidarse directamente a nivel de cuerpo de control (`ControlOrBinary`). Esto permite que el cuerpo de un `for`/`while`/`if` sea una asignacion sin parentesis, como en el ejemplo `fact` de la spec (A.9.2): `for (i in range(1, x+1)) f := f * i`. Para usar control de flujo como operando de un operador binario, se siguen necesitando parentesis: `(if (c) 1 else 2) + 3`. El cuerpo de un `let` (`let ... in <body>`) sigue requiriendo la forma explicita.
 
 **Nota:** La potencia liga mas fuerte que la negacion unaria, siguiendo la convencion matematica: `-2 ^ 2` se interpreta como `-(2 ^ 2) = -4`, no `(-2) ^ 2`. La negacion sigue ligando mas fuerte que `*`/`/`/`%`, de modo que `2 * -3` es `2 * (-3)`. Como el exponente admite un operando unario, `2 ^ -1` es valido.
 

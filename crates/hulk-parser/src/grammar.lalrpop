@@ -313,17 +313,19 @@ FuncParam: Param = {
 // Level 0: top-level expression (let, assign, control flow, or binary)
 pub Expr: Expr = {
     LetExpr,
-    AssignExpr,
     ControlOrBinary,
 };
 
-// Control flow OR binary expressions.
-// This is the "body" level for if/while/for: control flow can nest
-// directly, but to use control flow inside binary ops you need parens.
+// Control flow, assignment, OR binary expressions.
+// This is the "body" level for if/while/for: control flow and assignment can
+// nest directly here (`for (i in range(1,n)) f := f*i` relies on `:=` being a
+// valid loop body — A.9.2), but to use control flow inside binary
+// ops you still need parens. `let` bodies remain explicit (`let ... in ...`).
 ControlOrBinary: Expr = {
     IfExpr,
     WhileExpr,
     ForExpr,
+    AssignExpr,
     OrExpr,
 };
 

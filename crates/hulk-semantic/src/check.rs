@@ -12,7 +12,48 @@ use crate::ast::*;
 use crate::env::{Binding, Env};
 use crate::error::SemError;
 use crate::types::{FunctionSig, MethodSig, Type, TypeCtx, TypeInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Accumulated inference state for a single un-annotated parameter while
+/// walking a function/method body (A.9.3). Constraints come from usages that
+/// require a concrete type (arithmetic ⇒ `Number`, a condition ⇒ `Boolean`,
+/// a method call ⇒ the unique declaring type, etc.). Usages that accept any
+/// type (e.g. `==`, `print`, `@`) contribute no constraint.
+#[derive(Clone)]
+enum ParamConstraint {
+    /// No constraining usage seen yet.
+    Unknown,
+    /// A single most-specific type consistent with every usage so far.
+    Known(Type),
+    /// Two usages demanded types in different branches of the hierarchy; the
+    /// inferer is allowed to fail here (A.9.3), so we leave the parameter as
+    /// `Object` and let the type checker report the resulting mismatch.
+    Conflict,
+}
+
+impl ParamConstraint {
+    /// Fold a new required type into the constraint, keeping the most specific
+    /// type when one conforms to the other and flagging a `Conflict` otherwise.
+    /// Non-informative requirements (`Object`/`Error`) are ignored.
+    fn add(&mut self, ctx: &TypeCtx, ty: Type) {
+        if matches!(ty, Type::Object | Type::Error) {
+            return;
+        }
+        match self {
+            ParamConstraint::Unknown => *self = ParamConstraint::Known(ty),
+            ParamConstraint::Known(existing) => {
+                if *existing == ty {
+                    // already agree
+                } else if ctx.conforms(&ty, existing) {
+                    *self = ParamConstraint::Known(ty); // new one is more specific
+                } else if !ctx.conforms(existing, &ty) {
+                    *self = ParamConstraint::Conflict; // incompatible branches
+                }
+            }
+            ParamConstraint::Conflict => {}
+        }
+    }
+}
 
 #[derive(Clone)]
 struct MethodScope {
@@ -720,8 +761,12 @@ impl Checker {
 
     /// Element type produced by iterating `iter_ty`: the (substituted) return
     /// type of its `current()` method. Returns `None` when the type is not a
-    /// user type/interface or does not provide `current()` (e.g. `range`'s
-    /// runtime-only `Range`), letting the caller fall back to `Number`.
+    /// user type/interface or does not implement the full Iterable protocol
+    /// (A.11) — i.e. it lacks `current()` *or* `next()`. Requiring both here
+    /// means the type checker reports a non-iterable type instead of letting it
+    /// type-check and then crash in the VM's `for` lowering (which calls both
+    /// `next()` and `current()`). `range`'s runtime-only `Range` is not a user
+    /// type, so it returns `None` and the caller falls back to `Number`.
     fn iterator_element_type(&self, iter_ty: &Type) -> Option<Type> {
         let (name, subst) = match iter_ty {
             Type::User(n) => (n.clone(), HashMap::new()),
@@ -738,11 +783,16 @@ impl Checker {
             }
             _ => return None,
         };
-        let sig = if self.ctx.is_interface(&name) {
-            self.lookup_interface_method(&name, "current")
-        } else {
-            self.lookup_inherited_method(&name, "current")
-        }?;
+        let lookup = |method: &str| {
+            if self.ctx.is_interface(&name) {
+                self.lookup_interface_method(&name, method)
+            } else {
+                self.lookup_inherited_method(&name, method)
+            }
+        };
+        // The protocol requires `next()` to advance/terminate the iteration.
+        lookup("next")?;
+        let sig = lookup("current")?;
         Some(self.ctx.substitute(&sig.returns, &subst))
     }
 
@@ -760,6 +810,282 @@ impl Checker {
             return self.effective_ctor_params(&info.parent);
         }
         Vec::new()
+    }
+
+    // ------------------------------------------ pass 2.1: parameter inference
+    //
+    // Implements A.9.3: assign a type to every un-annotated function/method
+    // parameter from the way it is used in the body. The inferred type is the
+    // most specific type consistent with all constraining usages; if usages
+    // disagree across hierarchy branches the parameter is left as `Object` and
+    // the type checker reports the mismatch (A.9.3 allows the inferer to
+    // fail). Runs to a fixpoint so that a parameter constrained through a call
+    // to another function settles once that function's signature is known.
+    //
+    // This pass is monotonic and safe: it only narrows a parameter from the
+    // permissive `Object` default toward a concrete type when a usage *requires*
+    // that type. Usages that accept `Object` produce no constraint, so a program
+    // that type-checked before still does.
+    pub fn infer_params(&mut self, prog: &Program) {
+        let total_unannotated: usize = prog
+            .functions
+            .iter()
+            .flat_map(|f| &f.params)
+            .filter(|p| p.ty.is_none())
+            .count()
+            + prog
+                .types
+                .iter()
+                .flat_map(|t| &t.methods)
+                .flat_map(|m| &m.params)
+                .filter(|p| p.ty.is_none())
+                .count();
+        let max_iters = total_unannotated + 2;
+
+        for _ in 0..max_iters {
+            let mut changed = false;
+
+            for f in &prog.functions {
+                let unannotated: Vec<(usize, String)> = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.ty.is_none())
+                    .map(|(i, p)| (i, p.name.clone()))
+                    .collect();
+                if unannotated.is_empty() {
+                    continue;
+                }
+                let active: HashSet<String> = unannotated.iter().map(|(_, n)| n.clone()).collect();
+                let saved_scope =
+                    std::mem::replace(&mut self.current_generic_scope, f.generic_params.clone());
+                let mut acc: HashMap<String, ParamConstraint> = HashMap::new();
+                self.collect_param_constraints(&f.body, &active, &mut acc);
+                self.current_generic_scope = saved_scope;
+                if let Some(sig) = self.ctx.funcs.get_mut(&f.name) {
+                    for (i, name) in &unannotated {
+                        if let Some(ParamConstraint::Known(t)) = acc.get(name) {
+                            if sig.params[*i] != *t {
+                                sig.params[*i] = t.clone();
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for td in &prog.types {
+                for m in &td.methods {
+                    let unannotated: Vec<(usize, String)> = m
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| p.ty.is_none())
+                        .map(|(i, p)| (i, p.name.clone()))
+                        .collect();
+                    if unannotated.is_empty() {
+                        continue;
+                    }
+                    let active: HashSet<String> =
+                        unannotated.iter().map(|(_, n)| n.clone()).collect();
+                    let saved_scope = std::mem::replace(
+                        &mut self.current_generic_scope,
+                        td.generic_params.clone(),
+                    );
+                    let mut acc: HashMap<String, ParamConstraint> = HashMap::new();
+                    self.collect_param_constraints(&m.body, &active, &mut acc);
+                    self.current_generic_scope = saved_scope;
+                    if let Some(msig) = self
+                        .ctx
+                        .types
+                        .get_mut(&td.name)
+                        .and_then(|i| i.methods.get_mut(&m.name))
+                    {
+                        for (i, name) in &unannotated {
+                            if let Some(ParamConstraint::Known(t)) = acc.get(name) {
+                                if msig.params[*i] != *t {
+                                    msig.params[*i] = t.clone();
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Walk an expression and record, for each active (un-annotated) parameter
+    /// name, the types its usages require. `active` shrinks when a `let`/`for`
+    /// binding shadows a parameter name.
+    fn collect_param_constraints(
+        &self,
+        e: &Expr,
+        active: &HashSet<String>,
+        acc: &mut HashMap<String, ParamConstraint>,
+    ) {
+        match &e.kind {
+            ExprKind::BinOp(op, l, r) => {
+                let required = match op {
+                    BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Pow
+                    | BinOp::Mod
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge => Some(Type::Number),
+                    BinOp::And | BinOp::Or => Some(Type::Boolean),
+                    // `==`/`!=` accept any operands; `@`/`@@` accept String or
+                    // Number — neither pins a single type, so no constraint.
+                    BinOp::Eq | BinOp::Ne | BinOp::Concat | BinOp::ConcatWs => None,
+                };
+                if let Some(t) = required {
+                    self.constrain_if_param(l, active, acc, &t);
+                    self.constrain_if_param(r, active, acc, &t);
+                }
+                self.collect_param_constraints(l, active, acc);
+                self.collect_param_constraints(r, active, acc);
+            }
+            ExprKind::UnOp(op, x) => {
+                let t = match op {
+                    UnOp::Neg => Type::Number,
+                    UnOp::Not => Type::Boolean,
+                };
+                self.constrain_if_param(x, active, acc, &t);
+                self.collect_param_constraints(x, active, acc);
+            }
+            ExprKind::If(cond, then_b, elifs, else_b) => {
+                self.constrain_if_param(cond, active, acc, &Type::Boolean);
+                self.collect_param_constraints(cond, active, acc);
+                self.collect_param_constraints(then_b, active, acc);
+                for (c, b) in elifs {
+                    self.constrain_if_param(c, active, acc, &Type::Boolean);
+                    self.collect_param_constraints(c, active, acc);
+                    self.collect_param_constraints(b, active, acc);
+                }
+                self.collect_param_constraints(else_b, active, acc);
+            }
+            ExprKind::While(cond, body) => {
+                self.constrain_if_param(cond, active, acc, &Type::Boolean);
+                self.collect_param_constraints(cond, active, acc);
+                self.collect_param_constraints(body, active, acc);
+            }
+            ExprKind::For(var, iter, body) => {
+                self.collect_param_constraints(iter, active, acc);
+                let mut inner = active.clone();
+                inner.remove(var);
+                self.collect_param_constraints(body, &inner, acc);
+            }
+            ExprKind::Let(name, _annot, value, body) => {
+                self.collect_param_constraints(value, active, acc);
+                let mut inner = active.clone();
+                inner.remove(name);
+                self.collect_param_constraints(body, &inner, acc);
+            }
+            ExprKind::Call(name, args) => {
+                if let Some(sig) = self.ctx.funcs.get(name) {
+                    for (a, pty) in args.iter().zip(sig.params.iter()) {
+                        self.constrain_if_param(a, active, acc, pty);
+                    }
+                }
+                for a in args {
+                    self.collect_param_constraints(a, active, acc);
+                }
+            }
+            ExprKind::MethodCall(recv, method, args) => {
+                if let Some(t) = self.unique_method_owner(method) {
+                    self.constrain_if_param(recv, active, acc, &t);
+                }
+                self.collect_param_constraints(recv, active, acc);
+                for a in args {
+                    self.collect_param_constraints(a, active, acc);
+                }
+            }
+            ExprKind::New(tname, _ta, args) => {
+                let expected = self.effective_ctor_params(tname);
+                for (a, pty) in args.iter().zip(expected.iter()) {
+                    self.constrain_if_param(a, active, acc, pty);
+                }
+                for a in args {
+                    self.collect_param_constraints(a, active, acc);
+                }
+            }
+            ExprKind::Block(xs) => {
+                for x in xs {
+                    self.collect_param_constraints(x, active, acc);
+                }
+            }
+            ExprKind::Assign(_, v) => self.collect_param_constraints(v, active, acc),
+            ExprKind::AssignField(recv, _, v) => {
+                self.collect_param_constraints(recv, active, acc);
+                self.collect_param_constraints(v, active, acc);
+            }
+            ExprKind::GetField(recv, _) => self.collect_param_constraints(recv, active, acc),
+            ExprKind::Is(x, _) | ExprKind::As(x, _) => {
+                self.collect_param_constraints(x, active, acc)
+            }
+            ExprKind::Base(args) => {
+                for a in args {
+                    self.collect_param_constraints(a, active, acc);
+                }
+            }
+            ExprKind::Number(_)
+            | ExprKind::String(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Ident(_)
+            | ExprKind::SelfExpr => {}
+        }
+    }
+
+    /// If `e` is a direct reference to an active parameter, fold `ty` into its
+    /// constraint.
+    fn constrain_if_param(
+        &self,
+        e: &Expr,
+        active: &HashSet<String>,
+        acc: &mut HashMap<String, ParamConstraint>,
+        ty: &Type,
+    ) {
+        if let ExprKind::Ident(name) = &e.kind {
+            if active.contains(name) {
+                acc.entry(name.clone())
+                    .or_insert(ParamConstraint::Unknown)
+                    .add(&self.ctx, ty.clone());
+            }
+        }
+    }
+
+    /// Return the unique non-generic type or interface that *declares* `method`,
+    /// or `None` when zero or more than one do. Used to infer a parameter's type
+    /// from a method call on it (`function px(p) => p.getX()` ⇒ `p : Point`).
+    /// Conservative on purpose: when the method name is shared (e.g. an override
+    /// chain) it declines to constrain rather than guess.
+    fn unique_method_owner(&self, method: &str) -> Option<Type> {
+        let mut found: Option<String> = None;
+        for (name, info) in &self.ctx.types {
+            if info.generic_params.is_empty() && info.methods.contains_key(method) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(name.clone());
+            }
+        }
+        for (name, info) in &self.ctx.interfaces {
+            if info.generic_params.is_empty() && info.methods.contains_key(method) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(name.clone());
+            }
+        }
+        found.map(Type::User)
     }
 
     // ---------------------------------------------- pass 3: bodies & entry
@@ -1457,6 +1783,7 @@ pub fn analyze(prog: &Program) -> Result<TypeCtx, Vec<SemError>> {
     let mut c = Checker::new();
     c.collect(prog);
     c.sign(prog);
+    c.infer_params(prog);
     c.infer_returns(prog);
     c.check_interfaces(prog);
     c.check_overrides(prog);

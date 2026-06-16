@@ -1,0 +1,15 @@
+// A.9.3 — type inference of un-annotated parameters.
+// `x` infers to Number (arithmetic), `n` to Number (comparison + recursion),
+// and `p` to Point (the unique declarer of `getX`).
+// Note: the grammar requires all type declarations before function declarations.
+type Point(x: Number, y: Number) { px: Number = x; getX(): Number => self.px; }
+
+function double(x) => x * 2;
+function fib(n) => if (n <= 1) n else fib(n - 1) + fib(n - 2);
+function getXOf(p) => p.getX();
+
+{
+    print(double(21));              // 42
+    print(fib(10));                // 55
+    print(getXOf(new Point(7, 9))); // 7
+}

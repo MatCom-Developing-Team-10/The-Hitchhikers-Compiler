@@ -100,7 +100,9 @@ pub enum SemError {
     #[error("cannot instantiate interface `{name}` — use a concrete type")]
     CannotInstantiateInterface { name: String, span: Span },
 
-    #[error("type `{ty}` is not iterable (it provides no `current()` method)")]
+    #[error(
+        "type `{ty}` is not iterable (the Iterable protocol requires both `next(): Boolean` and `current()`)"
+    )]
     NotIterable { ty: String, span: Span },
 }
 

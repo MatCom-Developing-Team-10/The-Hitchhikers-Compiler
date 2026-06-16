@@ -383,7 +383,14 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
 
         // for (x in iter_expr) body
         //
-        // Compiled as: create iterator, while hasNext(): bind x = current(); body; next()
+        // Per the HULK spec (A.11.1), `for` transpiles to:
+        //   let iterable = iter_expr in
+        //   while (iterable.next())
+        //     let x = iterable.current() in body
+        //
+        // The Iterable protocol has exactly two methods: `next(): Boolean`
+        // (advances the cursor *and* reports whether a current element exists)
+        // and `current()` (the element). There is no separate `hasNext()`.
         ExprKind::For(var, iter_expr, body) => {
             let id = ctx.next();
             let start = format!("for_start_{id}");
@@ -398,9 +405,9 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
 
             out.push(Instr::Label(start.clone()));
 
-            // Condition: iter.hasNext()
+            // Condition: iter.next() — advances the cursor and yields Boolean.
             out.push(Instr::LoadVar(iter_var.clone()));
-            out.push(Instr::CallMethod("hasNext".to_string(), 0));
+            out.push(Instr::CallMethod("next".to_string(), 0));
             out.push(Instr::JumpIfFalse(end.clone()));
 
             out.push(Instr::Pop); // discard previous iteration result
@@ -412,11 +419,6 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             out.push(Instr::BindVar(var.clone()));
             lower_inner(body, out, ctx);
             out.push(Instr::EndScope);
-
-            // Advance: iter.next()  (return value discarded)
-            out.push(Instr::LoadVar(iter_var.clone()));
-            out.push(Instr::CallMethod("next".to_string(), 0));
-            out.push(Instr::Pop);
 
             out.push(Instr::Jump(start));
             out.push(Instr::Label(end));
@@ -649,6 +651,36 @@ fn lower_func(decl: &FunctionDecl) -> IrFunc {
 
 // ── OOP lowering helpers ───────────────────────────────────────────────────────
 
+/// Resolve the *effective* constructor parameter names for `type_name`,
+/// following the default-forwarding rule (A.7.3): a type that declares no
+/// constructor parameters of its own and does not provide an explicit
+/// `inherits Parent(args)` clause implicitly inherits its parent's parameters.
+///
+/// This mirrors the semantic analyzer's `effective_ctor_params` so that the
+/// generated `__ctor_*` function has the same arity the `new` call site (and
+/// the type checker) expects. Without this, `type Knight inherits Person { }`
+/// would lower to a zero-parameter constructor and drop the arguments passed to
+/// `new Knight(...)`, crashing at runtime with an undefined-variable error.
+fn effective_ctor_param_names(type_name: &str, all_types: &[TypeDecl]) -> Vec<String> {
+    let map: HashMap<&str, &TypeDecl> = all_types.iter().map(|t| (t.name.as_str(), t)).collect();
+    let mut cur = type_name;
+    loop {
+        let Some(decl) = map.get(cur) else {
+            return Vec::new();
+        };
+        if !decl.type_params.is_empty() {
+            return decl.type_params.iter().map(|p| p.name.clone()).collect();
+        }
+        // Forward to the parent only for the default form (`inherits Parent`
+        // with no explicit argument list) and only while the parent is a known
+        // user type. Any other shape contributes no inherited parameters.
+        match &decl.parent {
+            Some(p) if p.args.is_none() && map.contains_key(p.name.as_str()) => cur = &p.name,
+            _ => return Vec::new(),
+        }
+    }
+}
+
 /// Returns the ancestry chain for `type_name` from the root user-defined type
 /// down to (and including) `type_name`. The `all_types` slice is the full list
 /// of `TypeDecl`s from the program.
@@ -694,7 +726,11 @@ fn ancestry_chain<'a>(type_name: &str, all_types: &'a [TypeDecl]) -> Vec<&'a Typ
 /// leaf → root initialization order is observable only under cross-level
 /// attribute-name shadowing, which the language does not define.
 fn lower_constructor(decl: &TypeDecl, all_types: &[TypeDecl]) -> IrFunc {
-    let params: Vec<String> = decl.type_params.iter().map(|p| p.name.clone()).collect();
+    // Use the *effective* parameters (A.7.3 default forwarding) rather than the
+    // type's literal `type_params`: a type with no own parameters that inherits
+    // via the default form adopts its parent's parameters, so `new Child(args)`
+    // passes those args and the forwarding code below can read them by name.
+    let params: Vec<String> = effective_ctor_param_names(&decl.name, all_types);
     let mut body = Vec::new();
     let mut ctx = Ctx::new();
 
@@ -801,13 +837,22 @@ fn lower_method(type_name: &str, parent_name: &str, decl: &hulk_ast::MethodDecl)
 /// Register the built-in `Range` type and its synthetic IR functions.
 ///
 /// `range(lo, hi)` is compiled to `Call("__builtin_range", 2)`.  The returned
-/// object supports the Iterable protocol (`hasNext`, `current`, `next`) so
-/// that `for (x in range(lo, hi)) body` can dispatch through `CallMethod`.
+/// object implements the spec's two-method Iterable protocol (A.11): `next()`
+/// advances the cursor and returns whether a current element exists, and
+/// `current()` returns it. This mirrors the reference `Range` type:
+///
+/// ```text
+/// type Range(min, max) {
+///     current = min - 1;
+///     next(): Boolean => (self.current := self.current + 1) < max;
+///     current(): Number => self.current;
+/// }
+/// ```
 fn register_range_builtins(
     funcs: &mut HashMap<String, IrFunc>,
     types: &mut HashMap<String, IrTypeInfo>,
 ) {
-    // __builtin_range(lo, hi) → Range object
+    // __builtin_range(lo, hi) → Range object with current = lo - 1, hi = hi.
     funcs.insert(
         "__builtin_range".to_string(),
         IrFunc {
@@ -816,8 +861,10 @@ fn register_range_builtins(
                 Instr::NewObject("Range".to_string()),
                 Instr::BeginScope,
                 Instr::BindVar("__self".to_string()),
-                // current = lo
+                // current = lo - 1  (the first `next()` advances it to lo)
                 Instr::LoadVar("__lo".to_string()),
+                Instr::PushNum(1.0),
+                Instr::Sub,
                 Instr::LoadVar("__self".to_string()),
                 Instr::SetField("current".to_string()),
                 Instr::Pop,
@@ -833,12 +880,21 @@ fn register_range_builtins(
         },
     );
 
-    // hasNext(): self.current < self.hi
+    // next(): self.current := self.current + 1; return self.current < self.hi
     funcs.insert(
-        "__method_Range_hasNext".to_string(),
+        "__method_Range_next".to_string(),
         IrFunc {
             params: vec!["self".to_string()],
             body: vec![
+                // self.current := self.current + 1
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("current".to_string()),
+                Instr::PushNum(1.0),
+                Instr::Add,
+                Instr::LoadVar("self".to_string()), // obj on top for SetField
+                Instr::SetField("current".to_string()), // leaves new value on stack
+                Instr::Pop,
+                // new current < hi ?
                 Instr::LoadVar("self".to_string()),
                 Instr::GetField("current".to_string()),
                 Instr::LoadVar("self".to_string()),
@@ -862,31 +918,13 @@ fn register_range_builtins(
         },
     );
 
-    // next(): self.current := self.current + 1; return new value
-    funcs.insert(
-        "__method_Range_next".to_string(),
-        IrFunc {
-            params: vec!["self".to_string()],
-            body: vec![
-                Instr::LoadVar("self".to_string()),
-                Instr::GetField("current".to_string()),
-                Instr::PushNum(1.0),
-                Instr::Add,
-                Instr::LoadVar("self".to_string()), // obj on top for SetField
-                Instr::SetField("current".to_string()),
-                Instr::Ret,
-            ],
-        },
-    );
-
     types.insert(
         "Range".to_string(),
         IrTypeInfo {
             parent: "Object".to_string(),
             methods: [
-                ("hasNext".to_string(), "__method_Range_hasNext".to_string()),
-                ("current".to_string(), "__method_Range_current".to_string()),
                 ("next".to_string(), "__method_Range_next".to_string()),
+                ("current".to_string(), "__method_Range_current".to_string()),
             ]
             .into_iter()
             .collect(),
