@@ -47,7 +47,12 @@ pub struct Program {
 }
 ```
 
-El programa tiene forma: `TypeDecl* FunctionDecl* Expr ;?`
+El programa tiene forma: `Decl* Expr ;?`, donde cada `Decl` es una declaracion
+de **interfaz**, **tipo** o **funcion** y pueden aparecer **en cualquier orden**
+(HULK A.3: el orden de declaracion es irrelevante). La regla `Program` parsea una
+lista `TopDecl*` (enum interno `TopDecl` en `lib.rs`) y luego la particiona en los
+vectores `interfaces`, `types` y `functions`. Esto permite, por ejemplo, declarar
+una `function` antes que un `type`.
 
 ---
 

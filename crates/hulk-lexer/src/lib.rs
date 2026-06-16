@@ -284,6 +284,27 @@ pub fn parse_string(slice: &str) -> String {
     result
 }
 
+/// Scan a string-literal slice (including its surrounding quotes) for an
+/// invalid escape sequence. HULK recognizes only `\n`, `\t`, `\\` and `\"`.
+/// Returns the byte offset (relative to the slice) of the offending backslash,
+/// or `None` if every escape is valid. Backslashes are ASCII, so the returned
+/// offset is always a valid char boundary in the source.
+fn invalid_escape_offset(slice: &str) -> Option<usize> {
+    let bytes = slice.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            match bytes.get(i + 1) {
+                Some(b'n') | Some(b't') | Some(b'\\') | Some(b'"') => i += 2,
+                _ => return Some(i),
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
 // ---------- Lexer error ----------
 
 /// Error produced when the lexer encounters an unrecognized character.
@@ -330,6 +351,14 @@ impl<'input> Iterator for Lexer<'input> {
         let token = self.inner.next()?;
         let span = self.inner.span();
         match token {
+            Ok(Token::StringLit) => match invalid_escape_offset(self.inner.slice()) {
+                None => Some(Ok((span.start, Token::StringLit, span.end))),
+                // Report the offending backslash (ASCII, always a char boundary).
+                Some(rel) => Some(Err(LexError {
+                    start: span.start + rel,
+                    end: span.start + rel + 1,
+                })),
+            },
             Ok(tok) => Some(Ok((span.start, tok, span.end))),
             Err(()) => Some(Err(LexError {
                 start: span.start,

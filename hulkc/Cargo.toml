@@ -19,5 +19,3 @@ hulk-semantic = { workspace = true }
 hulk-ir       = { workspace = true }
 hulk-vm       = { workspace = true }
 lalrpop-util  = { workspace = true }
-clap          = { workspace = true }
-anyhow        = { workspace = true }

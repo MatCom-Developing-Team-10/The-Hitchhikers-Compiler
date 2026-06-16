@@ -3,7 +3,7 @@
 //! The grammar lives in `grammar.lalrpop` and is generated into `grammar.rs`
 //! by the build script.
 
-use hulk_ast::{AttrDecl, MethodDecl, Program};
+use hulk_ast::{AttrDecl, FunctionDecl, InterfaceDecl, MethodDecl, Program, TypeDecl};
 use hulk_lexer::{LexError, Lexer, Token};
 use lalrpop_util::lalrpop_mod;
 
@@ -24,6 +24,18 @@ pub(crate) enum TypeMemberKind {
     Attr(AttrDecl),
     /// A method declaration.
     Method(MethodDecl),
+}
+
+/// Helper enum used internally by the grammar to distinguish top-level
+/// declarations parsed in any order (HULK A.3: declaration order is irrelevant).
+#[derive(Debug)]
+pub(crate) enum TopDecl {
+    /// An interface declaration.
+    Interface(InterfaceDecl),
+    /// A type declaration.
+    Type(TypeDecl),
+    /// A function declaration.
+    Function(FunctionDecl),
 }
 
 /// Parse a HULK source string into a [`Program`] AST.

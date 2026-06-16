@@ -201,7 +201,7 @@ impl Checker {
         }
 
         for f in &prog.functions {
-            if matches!(f.name.as_str(), "self" | "base") {
+            if matches!(f.name.as_str(), "self") {
                 self.errors.push(SemError::ReservedName {
                     name: f.name.clone(),
                     span: f.span,
@@ -247,7 +247,7 @@ impl Checker {
     pub fn sign(&mut self, prog: &Program) {
         for f in &prog.functions {
             for p in &f.params {
-                if matches!(p.name.as_str(), "self" | "base") {
+                if matches!(p.name.as_str(), "self") {
                     self.errors.push(SemError::ReservedName {
                         name: p.name.clone(),
                         span: p.span,
@@ -278,7 +278,7 @@ impl Checker {
         }
         for td in &prog.types {
             for p in &td.type_params {
-                if matches!(p.name.as_str(), "self" | "base") {
+                if matches!(p.name.as_str(), "self") {
                     self.errors.push(SemError::ReservedName {
                         name: p.name.clone(),
                         span: p.span,
@@ -331,7 +331,7 @@ impl Checker {
             let mut methods = HashMap::new();
             for m in &td.methods {
                 for p in &m.params {
-                    if matches!(p.name.as_str(), "self" | "base") {
+                    if matches!(p.name.as_str(), "self") {
                         self.errors.push(SemError::ReservedName {
                             name: p.name.clone(),
                             span: p.span,
@@ -1355,8 +1355,17 @@ impl Checker {
             ExprKind::GetField(recv, name) => {
                 let is_self = matches!(recv.kind, ExprKind::SelfExpr);
                 let rt = self.check_expr(env, recv);
-                if !is_self {
-                    // A.7: attributes are private — accessible only via `self`.
+                // A.7: attributes are private. They are reachable through `self`,
+                // or — as in mainstream OOP languages — between instances of the
+                // same type hierarchy from within that type's own methods (e.g.
+                // `other.x` inside a method of the receiver's type). Access from
+                // a context with no enclosing `self` (top-level) stays private.
+                let accessible = is_self
+                    || env.lookup("self").is_some_and(|enclosing| {
+                        self.ctx.conforms(&rt, &enclosing.ty)
+                            || self.ctx.conforms(&enclosing.ty, &rt)
+                    });
+                if !accessible {
                     self.errors.push(SemError::NoSuchAttribute {
                         ty: rt.name(),
                         name: name.clone(),
@@ -1400,7 +1409,7 @@ impl Checker {
             }
 
             ExprKind::Let(name, annot, value, body) => {
-                if matches!(name.as_str(), "self" | "base") {
+                if matches!(name.as_str(), "self") {
                     self.errors.push(SemError::ReservedName {
                         name: name.clone(),
                         span: e.span,
@@ -1427,7 +1436,7 @@ impl Checker {
                     None => vt,
                 };
                 env.enter();
-                if !matches!(name.as_str(), "self" | "base") {
+                if !matches!(name.as_str(), "self") {
                     env.define(
                         name,
                         Binding {

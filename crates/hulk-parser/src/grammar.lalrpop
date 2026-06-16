@@ -5,7 +5,7 @@
 
 use hulk_ast::*;
 use hulk_lexer::{Token, LexError, parse_number, parse_string};
-use crate::TypeMemberKind;
+use crate::{TypeMemberKind, TopDecl};
 
 grammar<'input>(input: &'input str);
 
@@ -116,9 +116,26 @@ GenericArgs: Vec<TypeRef> = {
 // =====================================================================
 
 pub Program: Program = {
-    <interfaces:InterfaceDecl*> <types:TypeDecl*> <functions:FunctionDecl*> <entry:Expr> ";"? => {
+    // Declarations may appear in any order (A.3); partition them afterwards.
+    <decls:TopDecl*> <entry:Expr> ";"? => {
+        let mut interfaces = Vec::new();
+        let mut types = Vec::new();
+        let mut functions = Vec::new();
+        for decl in decls {
+            match decl {
+                TopDecl::Interface(i) => interfaces.push(i),
+                TopDecl::Type(t) => types.push(t),
+                TopDecl::Function(f) => functions.push(f),
+            }
+        }
         Program { interfaces, types, functions, entry }
     },
+};
+
+TopDecl: TopDecl = {
+    <i:InterfaceDecl> => TopDecl::Interface(i),
+    <t:TypeDecl> => TopDecl::Type(t),
+    <f:FunctionDecl> => TopDecl::Function(f),
 };
 
 // =====================================================================

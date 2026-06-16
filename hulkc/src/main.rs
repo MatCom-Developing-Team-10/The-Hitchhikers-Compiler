@@ -1,90 +1,226 @@
-//! `hulkc` — command-line driver for the HULK compiler.
+//! `hulk` — command-line driver for the HULK compiler.
+//!
+//! Implements the `matcom/compilers` interface contract:
+//!
+//! * `hulk <file.hulk>` validates the program (lexing, parsing, semantic
+//!   analysis). On success it emits an executable `./output` and exits `0`.
+//!   On failure it prints diagnostics to stderr, one per line, in the format
+//!   `(line,col) TYPE: message` (TYPE ∈ `LEXICAL` | `SYNTACTIC` | `SEMANTIC`)
+//!   and exits with the code of the most fundamental error type
+//!   (1 = lexical, 2 = syntactic, 3 = semantic).
+//! * `hulk exec <file|->` runs the full pipeline (including the VM) on a
+//!   program read from a path or stdin. This is the internal entry point that
+//!   the generated `./output` wrapper re-invokes; it is not part of the public
+//!   interface.
+//! * `hulk parse <file>` dumps the AST (development aid).
 
-use anyhow::Context;
-use anyhow::Result;
-use clap::{Parser, Subcommand};
+use std::io::Read;
+use std::process::exit;
+
 use hulk_parser::ParseError;
 
-#[derive(Parser)]
-#[command(name = "hulkc", version, about = "HULK compiler", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
+/// Exit code reported for a lexical error.
+const EXIT_LEXICAL: i32 = 1;
+/// Exit code reported for a syntactic error.
+const EXIT_SYNTACTIC: i32 = 2;
+/// Exit code reported for a semantic error.
+const EXIT_SEMANTIC: i32 = 3;
 
-#[derive(Subcommand)]
-enum Command {
-    /// Compile and execute a HULK source file.
-    Run {
-        /// Path to a `.hulk` source file.
-        file: String,
-    },
-    /// Parse a HULK source file and dump the AST.
-    Parse {
-        /// Path to a `.hulk` source file.
-        file: String,
-    },
-}
-
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-
-    match cli.command {
-        Command::Run { file } => cmd_run(&file),
-        Command::Parse { file } => cmd_parse(&file),
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("exec") => {
+            let target = args.get(2).map(String::as_str).unwrap_or("-");
+            cmd_exec(target);
+        }
+        Some("parse") => match args.get(2) {
+            Some(file) => cmd_parse(file),
+            None => usage_error(),
+        },
+        Some(file) if !file.starts_with('-') => cmd_compile(file),
+        _ => usage_error(),
     }
 }
 
-fn cmd_run(file: &str) -> Result<()> {
-    let source = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read source file: {file}"))?;
+/// Print a usage message to stderr and exit with the conventional code 64.
+fn usage_error() -> ! {
+    eprintln!("usage: hulk <file.hulk>");
+    exit(64);
+}
 
-    let ast =
-        hulk_parser::parse(&source).map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
+/// Read a source file or exit with an I/O diagnostic.
+fn read_source(file: &str) -> String {
+    match std::fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(err) => {
+            eprintln!("(0,0) SEMANTIC: cannot read source file `{file}`: {err}");
+            exit(EXIT_SEMANTIC);
+        }
+    }
+}
 
-    hulk_semantic::analyze(&ast).map_err(|errs| {
-        let msg = errs
-            .iter()
-            .map(|e| format!("  {e}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        anyhow::anyhow!("semantic errors:\n{msg}")
-    })?;
+/// Compile mode: validate `file`, and on success emit `./output`.
+fn cmd_compile(file: &str) {
+    let source = read_source(file);
+
+    let ast = match hulk_parser::parse(&source) {
+        Ok(ast) => ast,
+        Err(err) => report_parse_error(&source, err),
+    };
+
+    if let Err(errors) = hulk_semantic::analyze(&ast) {
+        for error in &errors {
+            let (line, col) = line_col(&source, error.span().lo as usize);
+            eprintln!("({line},{col}) SEMANTIC: {error}");
+        }
+        exit(EXIT_SEMANTIC);
+    }
+
+    write_output(&source);
+}
+
+/// Internal exec mode: run the full pipeline (VM included) on a program read
+/// from `target` (a path, or `-` for stdin). Used by the generated `./output`.
+fn cmd_exec(target: &str) {
+    let source = if target == "-" {
+        let mut buffer = String::new();
+        if let Err(err) = std::io::stdin().read_to_string(&mut buffer) {
+            eprintln!("(0,0) SEMANTIC: cannot read program from stdin: {err}");
+            exit(EXIT_SEMANTIC);
+        }
+        buffer
+    } else {
+        read_source(target)
+    };
+
+    let ast = match hulk_parser::parse(&source) {
+        Ok(ast) => ast,
+        Err(err) => report_parse_error(&source, err),
+    };
+
+    if let Err(errors) = hulk_semantic::analyze(&ast) {
+        for error in &errors {
+            let (line, col) = line_col(&source, error.span().lo as usize);
+            eprintln!("({line},{col}) SEMANTIC: {error}");
+        }
+        exit(EXIT_SEMANTIC);
+    }
 
     let ir = hulk_ir::lower_program(&ast);
-
-    hulk_vm::Vm::run_program(ir).map_err(|e| anyhow::anyhow!("runtime error: {e}"))
+    if let Err(err) = hulk_vm::Vm::run_program(ir) {
+        eprintln!("(0,0) SEMANTIC: runtime error: {err}");
+        exit(EXIT_SEMANTIC);
+    }
 }
 
-fn cmd_parse(file: &str) -> Result<()> {
-    let source = std::fs::read_to_string(file)
-        .with_context(|| format!("failed to read source file: {file}"))?;
-
-    let ast =
-        hulk_parser::parse(&source).map_err(|e| anyhow::anyhow!(format_parse_error(&source, e)))?;
-
-    println!("{ast:#?}");
-    Ok(())
+/// Development aid: dump the parsed AST.
+fn cmd_parse(file: &str) {
+    let source = read_source(file);
+    match hulk_parser::parse(&source) {
+        Ok(ast) => println!("{ast:#?}"),
+        Err(err) => report_parse_error(&source, err),
+    }
 }
 
-fn format_parse_error(source: &str, err: ParseError<'_>) -> String {
-    match &err {
-        lalrpop_util::ParseError::InvalidToken { location }
-        | lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
-            format!("parse error at {location}: {err:?}")
+/// Write a self-contained `./output` executable that re-runs the validated
+/// program through the interpreter. The script embeds the program source via a
+/// quoted here-document and invokes this binary in `exec` mode.
+fn write_output(source: &str) {
+    let exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!("(0,0) SEMANTIC: cannot locate compiler binary: {err}");
+            exit(EXIT_SEMANTIC);
         }
-        lalrpop_util::ParseError::UnrecognizedToken { token, .. } => {
+    };
+
+    let script = format!(
+        "#!/bin/sh\n'{}' exec - <<'__HULK_SOURCE_EOF__'\n{}\n__HULK_SOURCE_EOF__\n",
+        exe.display(),
+        source,
+    );
+
+    if let Err(err) = std::fs::write("output", script) {
+        eprintln!("(0,0) SEMANTIC: cannot write ./output: {err}");
+        exit(EXIT_SEMANTIC);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(err) = std::fs::set_permissions("output", std::fs::Permissions::from_mode(0o755))
+        {
+            eprintln!("(0,0) SEMANTIC: cannot make ./output executable: {err}");
+            exit(EXIT_SEMANTIC);
+        }
+    }
+}
+
+/// Convert a byte offset into a 1-based `(line, column)` pair for diagnostics.
+/// Columns count Unicode scalar values within the line, not bytes.
+fn line_col(source: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(source.len());
+    let mut line = 1;
+    let mut col = 1;
+    for ch in source[..offset].chars() {
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
+}
+
+/// Print a parse/lex diagnostic in the interface format and exit with the code
+/// for its category. A `ParseError::User` carries a lexer error (LEXICAL);
+/// every other variant is a grammar error (SYNTACTIC).
+fn report_parse_error(source: &str, err: ParseError<'_>) -> ! {
+    let (line, col, kind, code, message) = match &err {
+        ParseError::User { error } => {
+            let (line, col) = line_col(source, error.start);
+            let snippet = source.get(error.start..error.end.min(source.len()));
+            let message = match snippet {
+                Some(text) if !text.is_empty() => format!("unexpected character {text:?}"),
+                _ => "unexpected character".to_string(),
+            };
+            (line, col, "LEXICAL", EXIT_LEXICAL, message)
+        }
+        ParseError::InvalidToken { location } => {
+            let (line, col) = line_col(source, *location);
+            (line, col, "SYNTACTIC", EXIT_SYNTACTIC, "invalid token".to_string())
+        }
+        ParseError::UnrecognizedEof { location, expected } => {
+            let (line, col) = line_col(source, *location);
+            let message = format!("unexpected end of input{}", expected_suffix(expected));
+            (line, col, "SYNTACTIC", EXIT_SYNTACTIC, message)
+        }
+        ParseError::UnrecognizedToken { token, expected } => {
             let (lo, _tok, hi) = token;
+            let (line, col) = line_col(source, *lo);
             let snippet = source.get(*lo..(*hi).min(source.len())).unwrap_or("");
-            format!("parse error at {lo}..{hi}: {err:?}\n  near: {snippet:?}")
+            let message =
+                format!("unexpected token {snippet:?}{}", expected_suffix(expected));
+            (line, col, "SYNTACTIC", EXIT_SYNTACTIC, message)
         }
-        lalrpop_util::ParseError::ExtraToken { token } => {
+        ParseError::ExtraToken { token } => {
             let (lo, _tok, hi) = token;
+            let (line, col) = line_col(source, *lo);
             let snippet = source.get(*lo..(*hi).min(source.len())).unwrap_or("");
-            format!("extra token at {lo}..{hi}: {err:?}\n  near: {snippet:?}")
+            (line, col, "SYNTACTIC", EXIT_SYNTACTIC, format!("extra token {snippet:?}"))
         }
-        lalrpop_util::ParseError::User { error } => {
-            format!("lex error at {}..{}: {error}", error.start, error.end)
-        }
+    };
+
+    eprintln!("({line},{col}) {kind}: {message}");
+    exit(code);
+}
+
+/// Render an `expected one of ...` suffix when the parser reported candidates.
+fn expected_suffix(expected: &[String]) -> String {
+    if expected.is_empty() {
+        String::new()
+    } else {
+        format!(", expected one of {}", expected.join(", "))
     }
 }

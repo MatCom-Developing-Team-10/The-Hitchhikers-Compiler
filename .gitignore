@@ -6,6 +6,13 @@
 # LALRpop generated files
 crates/hulk-parser/src/grammar.rs
 
+# Build outputs of the matcom/compilers interface (`make build` / `./hulk`)
+/hulk
+/output
+
+# Local planning artifacts (canonical is docs/PLAN.md)
+/PLAN.md
+
 # Editor / IDE
 .idea/
 .vscode/

@@ -125,6 +125,14 @@ Los comentarios de bloque (`/* */`) **no estan soportados**.
 
 **`self` y `base` son identificadores**, no keywords. El parser los distingue por contexto gramatical.
 
+### Validacion de escapes en strings
+
+El regex de `StringLit` acepta cualquier escape `\.`, pero el adaptador `Lexer`
+(funcion `invalid_escape_offset`) **valida** las secuencias de escape tras la
+tokenizacion: solo se permiten `\n`, `\t`, `\\` y `\"`. Cualquier otra secuencia
+(p. ej. `\q`) produce un `LexError` apuntando al backslash ofensivo, de modo que
+un string con escape invalido es un **error lexico** (no se acepta silenciosamente).
+
 ---
 
 ## API publica
