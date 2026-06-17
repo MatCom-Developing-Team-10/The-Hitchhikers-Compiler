@@ -221,6 +221,59 @@ mod tests {
     }
 
     #[test]
+    fn control_flow_body_accepts_bare_let() {
+        // The book's A.6.1 gcd: a `while` whose body is a bare `let` (no parens).
+        let prog =
+            parse("function gcd(a, b) => while (a > 0) let m = a % b in { b := a; a := m; }; 0;")
+                .unwrap();
+        let body = &prog.functions[0].body;
+        // while ( ... ) <body>, where <body> is the Let.
+        match &body.kind {
+            ExprKind::While(_, while_body) => {
+                assert!(
+                    matches!(while_body.kind, ExprKind::Let(..)),
+                    "while body should parse as a bare Let"
+                );
+            }
+            other => panic!("expected While, got {other:?}"),
+        }
+
+        // The same for `if`/`elif`/`else` and `for` bodies.
+        parse("if (true) let x = 1 in x else let y = 2 in y;").unwrap();
+        parse("for (x in range(0, 3)) let y = x * 2 in print(y);").unwrap();
+    }
+
+    #[test]
+    fn control_flow_as_binary_operand() {
+        // `total + if (c) 1 else 0` (A.13) — control flow as a binary operand
+        // without parentheses, parsed via the open/closed expression split.
+        let prog = parse("1 + if (true) 1 else 0;").unwrap();
+        match &prog.entry.kind {
+            ExprKind::BinOp(BinOp::Add, _lhs, rhs) => {
+                assert!(
+                    matches!(rhs.kind, ExprKind::If(..)),
+                    "rhs of + should be an If"
+                );
+            }
+            other => panic!("expected Add with an If rhs, got {other:?}"),
+        }
+        // The control-flow tail binds greedily to the right.
+        parse("print(if (x) a else b);").unwrap();
+        parse("let n = 0 in for (i in range(0, 10)) n := n + if (i % 2 == 0) 1 else 0;").unwrap();
+    }
+
+    #[test]
+    fn parses_typed_iterable_annotation() {
+        // `T*` typed-iterable syntax (A.11.2) in a parameter annotation.
+        let prog = parse("function sum(xs: Number*): Number => 0; 0;").unwrap();
+        let ty = prog.functions[0].params[0].ty.as_ref().unwrap();
+        assert!(
+            matches!(ty, TypeRef::Iterable(inner) if matches!(&**inner, TypeRef::Simple(n) if n == "Number")),
+            "expected Iterable(Simple(\"Number\")), got {ty:?}"
+        );
+    }
+
+    #[test]
     fn parses_function_call() {
         let prog = parse("print(42);").unwrap();
         if let ExprKind::Call(name, args) = &prog.entry.kind {

@@ -769,6 +769,7 @@ impl Checker {
     /// type, so it returns `None` and the caller falls back to `Number`.
     fn iterator_element_type(&self, iter_ty: &Type) -> Option<Type> {
         let (name, subst) = match iter_ty {
+            Type::Iterable(elem) => return Some((**elem).clone()),
             Type::User(n) => (n.clone(), HashMap::new()),
             Type::Generic(n, targs) => {
                 let info_params = if self.ctx.is_interface(n) {
@@ -1549,6 +1550,8 @@ impl Checker {
                     // `Object` is the escape hatch for `range(...)` and other
                     // runtime-only iterables; bind the element as `Number`.
                     Type::Object => Type::Number,
+                    // A typed iterable `T*` binds the element directly as `T`.
+                    Type::Iterable(elem) => (**elem).clone(),
                     // A user type/interface is iterable only if it provides the
                     // iterator protocol (probed via `current()`).
                     Type::User(_) | Type::Generic(_, _) => {

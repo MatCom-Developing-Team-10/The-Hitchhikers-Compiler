@@ -6,7 +6,7 @@
 - `crates/hulk-parser/src/lib.rs`
 - `crates/hulk-parser/src/grammar.lalrpop`
 **Generador:** [LALRpop](https://github.com/lalrpop/lalrpop) v0.23
-**Ultima actualizacion:** 2026-06-10 (extension: generics con `[T]`)
+**Ultima actualizacion:** 2026-06-16 (control de flujo como operando vía gramatica abierta/cerrada; iterable tipado `T*`)
 
 > Este archivo es la fuente de verdad sobre el parser y el AST. Cualquier cambio en `hulk-parser` o `hulk-ast` **DEBE** reflejarse aqui en el mismo commit.
 
@@ -292,7 +292,12 @@ De **mayor** a **menor** precedencia:
 | 1 | OR logico | `\|` | Izquierda |
 | 0 | Top-level | `let`, `:=`, control flow, expresiones binarias | — |
 
-**Nota:** El control de flujo (`if`, `while`, `for`, bloques) y la asignacion destructiva (`:=`) pueden anidarse directamente a nivel de cuerpo de control (`ControlOrBinary`). Esto permite que el cuerpo de un `for`/`while`/`if` sea una asignacion sin parentesis, como en el ejemplo `fact` de la spec (A.9.2): `for (i in range(1, x+1)) f := f * i`. Para usar control de flujo como operando de un operador binario, se siguen necesitando parentesis: `(if (c) 1 else 2) + 3`. El cuerpo de un `let` (`let ... in <body>`) sigue requiriendo la forma explicita.
+**Nota (todo es expresion — gramatica abierta/cerrada):** HULK permite control de flujo (`if`/`while`/`for`/`let`) en cualquier posicion de expresion, incluido como operando binario: `total + if (c) 1 else 0` (A.13) o `print(if (c) a else b)`. Para que esto sea no ambiguo y LALR(1), el nivel de expresion se parte en dos:
+
+- **`ClosedExpr`** (`= AssignExpr | OrExpr`): arbol binario/asignacion que nunca termina en un control de flujo "desnudo".
+- **`OpenExpr`** (`= OrExprC`): cadena binaria cuyo operando *mas a la derecha* es un control de flujo/`let` (`CtrlAtom`). Cada nivel abierto (`*C`) toma como operando izquierdo la version *cerrada*, de modo que nunca es recursivo por la izquierda sobre si mismo. Consecuencia: un control de flujo solo puede aparecer como **cola** de la expresion y su rama se extiende avidamente hacia la derecha (`1 + if (false) 10 else 2 + 3` ≡ `1 + (if false 10 else (2 + 3))`). La divergencia cerrado/abierto la decide la palabra clave `if`/`while`/`for`/`let` (FIRST disjunto de cualquier atomo cerrado), por eso es LALR(1).
+
+Los cuerpos de `if`/`elif`/`else`/`while`/`for` y de `let ... in` son `Expr` completo, asi que aceptan control de flujo, `:=` y `let` desnudos: parsean tal cual el `gcd` de A.6.1 (`while (a > 0) let m = a % b in { b := a; a := m; };`) y el `fact` de A.9.2 (`for (i in range(1, x+1)) f := f * i`). Solo el *init* de un binding (`let x = <init>`) usa la forma restringida `ControlOrBinary` (sin `let` desnudo), para que el `in` se empareje sin ambiguedad con su `let`.
 
 **Nota:** La potencia liga mas fuerte que la negacion unaria, siguiendo la convencion matematica: `-2 ^ 2` se interpreta como `-(2 ^ 2) = -4`, no `(-2) ^ 2`. La negacion sigue ligando mas fuerte que `*`/`/`/`%`, de modo que `2 * -3` es `2 * (-3)`. Como el exponente admite un operando unario, `2 ^ -1` es valido.
 
@@ -414,10 +419,13 @@ Antes, las anotaciones de tipo se representaban como `Option<String>`. Ahora son
 pub enum TypeRef {
     Simple(String),                    // Number, Point, T
     Generic(String, Vec<TypeRef>),     // List[Number], Map[String, List[Number]]
+    Iterable(Box<TypeRef>),            // Number*  (iterable tipado, A.11.2)
 }
 ```
 
 Disponible en: `Param.ty`, `AttrDecl.ty`, `FunctionDecl.return_ty`, `MethodDecl.return_ty`, `ExprKind::Let`, `ExprKind::Is`, `ExprKind::As`.
+
+**Iterable tipado `T*` (A.11.2):** el postfijo `*` sobre un `TypeRef` denota "un iterable cuyos elementos son `T`". En la gramatica es `TypeRef "*"` (solo aparece en posiciones de anotacion de tipo, nunca donde se espera multiplicacion, asi que no colisiona con `*`). Semanticamente, un tipo concreto conforma a `T*` si implementa el protocolo iterable (`next(): Boolean` + `current(): T'` con `T' <= T`), y `for (x in it)` con `it: T*` liga `x : T`. Ejemplo: `function sum(numbers: Number*): Number => ...`.
 
 ### Sintaxis
 

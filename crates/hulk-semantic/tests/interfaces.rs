@@ -82,6 +82,78 @@ fn interface_as_let_type_accepts_concrete_implementing_type() {
 }
 
 #[test]
+fn structural_conformance_without_implements_clause() {
+    // A type with the right methods conforms to an interface even without an
+    // explicit `implements` clause (protocol-style structural typing, A.10.2).
+    // This is the matcom `ok/interfaces/interface_basic` scenario.
+    let source = r#"
+        interface Printable { to_string(): String; }
+        type Point(x: Number, y: Number) {
+            x: Number = x;
+            y: Number = y;
+            to_string(): String => "point";
+        }
+        let p: Printable = new Point(1, 2) in p.to_string();
+    "#;
+    let p = parse(source);
+    let result = analyze(&p);
+    assert!(result.is_ok(), "expected ok, got {:?}", result.err());
+}
+
+#[test]
+fn structural_conformance_requires_matching_signature() {
+    // Missing the required method (wrong name) must NOT conform structurally.
+    let source = r#"
+        interface Printable { to_string(): String; }
+        type Point(x: Number) {
+            x: Number = x;
+            describe(): String => "point";
+        }
+        let p: Printable = new Point(1) in 0;
+    "#;
+    let p = parse(source);
+    assert!(
+        analyze(&p).is_err(),
+        "a type lacking the required method must not conform"
+    );
+}
+
+#[test]
+fn typed_iterable_param_accepts_conforming_iterable() {
+    // `T*` (A.11.2): a user type implementing next()/current(): Number conforms
+    // to a `Number*` parameter, and the loop variable binds to Number.
+    let source = r#"
+        type Squares(n: Number) {
+            i: Number = 0;
+            limit: Number = n;
+            next(): Boolean { self.i := self.i + 1; self.i <= self.limit; }
+            current(): Number { self.i * self.i; }
+        }
+        function sum_gen(gen: Number*): Number {
+            let s: Number = 0 in { for (x in gen) s := s + x; s; };
+        }
+        sum_gen(new Squares(3));
+    "#;
+    let p = parse(source);
+    let result = analyze(&p);
+    assert!(result.is_ok(), "expected ok, got {:?}", result.err());
+}
+
+#[test]
+fn typed_iterable_param_rejects_non_iterable() {
+    // Passing a Number where a `Number*` is expected must be a type error.
+    let source = r#"
+        function sum_gen(gen: Number*): Number => 0;
+        sum_gen(42);
+    "#;
+    let p = parse(source);
+    assert!(
+        analyze(&p).is_err(),
+        "a non-iterable argument must not conform to `Number*`"
+    );
+}
+
+#[test]
 fn cannot_instantiate_interface() {
     let source = r#"
         interface Greeter { greet(): String; }

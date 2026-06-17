@@ -25,6 +25,9 @@ pub enum Type {
     Generic(String, Vec<Type>),
     /// An unresolved type parameter inside a generic declaration's scope.
     Param(String),
+    /// A typed iterable `T*` (A.11.2): any value implementing the iterable
+    /// protocol whose `current()` yields the boxed element type.
+    Iterable(Box<Type>),
     /// Poison value — propagated after a reported error to silence cascades.
     Error,
 }
@@ -48,6 +51,7 @@ impl Type {
                 s.push(']');
                 s
             }
+            Type::Iterable(elem) => format!("{}*", elem.name()),
             Type::Error => "<error>".into(),
         }
     }
@@ -228,6 +232,9 @@ impl TypeCtx {
     pub fn resolve_type_ref(&self, tref: &TypeRef) -> Option<Type> {
         match tref {
             TypeRef::Simple(name) => self.resolve_name(name),
+            TypeRef::Iterable(inner) => {
+                Some(Type::Iterable(Box::new(self.resolve_type_ref(inner)?)))
+            }
             TypeRef::Generic(name, args) => {
                 let resolved_args: Vec<Type> = args
                     .iter()
@@ -254,6 +261,9 @@ impl TypeCtx {
                     self.resolve_name(name)
                 }
             }
+            TypeRef::Iterable(inner) => Some(Type::Iterable(Box::new(
+                self.resolve_type_ref_in_scope(inner, scope)?,
+            ))),
             TypeRef::Generic(name, args) => {
                 let resolved_args: Vec<Type> = args
                     .iter()
@@ -281,10 +291,12 @@ impl TypeCtx {
     /// 4. `Number`, `String`, `Boolean` conform only to themselves and to `Object`.
     /// 5. Generic types conform invariantly: `T[A]` ≤ `T[B]` iff `A == B`.
     /// 6. Type parameters (`Param`) conform only to themselves and `Object`.
-    /// 7. **Interfaces (extension):** `a` conforms to interface `b` if `a`
-    ///    (or one of its ancestors in the inheritance chain) declares
-    ///    `implements b`, or one of those implemented interfaces transitively
-    ///    extends `b`.
+    /// 7. **Interfaces (extension):** `a` conforms to interface `b` if either
+    ///    (a) `a` or one of its ancestors declares `implements b` (or implements
+    ///    an interface that transitively `extends b`) — nominal conformance; or
+    ///    (b) `a` structurally provides every method `b` requires (incl. via
+    ///    `extends`) with a matching signature — protocol-style conformance
+    ///    (A.10.2), no `implements` clause needed.
     /// 8. Otherwise: walk the parent chain of `a`; if it reaches `b`, conform.
     pub fn conforms(&self, a: &Type, b: &Type) -> bool {
         if matches!(a, Type::Error) || matches!(b, Type::Error) {
@@ -295,6 +307,23 @@ impl TypeCtx {
         }
         if matches!(b, Type::Object) {
             return true;
+        }
+        // Typed iterable `T*` (A.11.2). `a` conforms to `Iterable(elem)` if it
+        // is itself an iterable of a conforming element type, or a concrete type
+        // that implements the iterable protocol with a conforming `current()`.
+        if let Type::Iterable(elem) = b {
+            return match a {
+                Type::Iterable(ea) => self.conforms(ea, elem),
+                Type::User(_) | Type::Generic(_, _) => self
+                    .iterable_element_of(a)
+                    .is_some_and(|e| self.conforms(&e, elem)),
+                _ => false,
+            };
+        }
+        // An iterable on the left conforms to nothing else (beyond `Object`,
+        // handled above, and another iterable, handled above).
+        if matches!(a, Type::Iterable(_)) {
+            return false;
         }
         if matches!(
             a,
@@ -310,10 +339,15 @@ impl TypeCtx {
             Type::User(n) | Type::Generic(n, _) => n.clone(),
             _ => return false,
         };
-        // Interface subtyping (extension): if `b` names an interface, walk `a`'s
-        // implements chain (own + ancestors) and check transitive interface extends.
+        // Interface subtyping (extension): if `b` names an interface, accept
+        // either an explicit `implements` (nominal) or structural conformance —
+        // the type provides every required method with a matching signature,
+        // even without an `implements` clause (protocol-style, A.10.2).
         if self.is_interface(&target_base) {
-            return self.implements_interface(&cur_base, &target_base);
+            if self.implements_interface(&cur_base, &target_base) {
+                return true;
+            }
+            return self.structurally_implements(&cur_base, b);
         }
         // Generic invariance: only equal heads + equal args conform (handled by `a == b` above).
         let mut cur = cur_base;
@@ -350,6 +384,96 @@ impl TypeCtx {
             cur = info.parent.clone();
         }
         false
+    }
+
+    /// Structural (protocol-style) conformance: a type conforms to an interface
+    /// if it provides every method the interface requires (including those
+    /// inherited through `extends`), with matching signatures — even when the
+    /// type carries no explicit `implements` clause (HULK protocols, A.10.2).
+    fn structurally_implements(&self, tname: &str, iface_ty: &Type) -> bool {
+        let (iface_name, iface_args) = match iface_ty {
+            Type::User(n) => (n.clone(), Vec::new()),
+            Type::Generic(n, args) => (n.clone(), args.clone()),
+            _ => return false,
+        };
+        let Some(iface_info) = self.interfaces.get(&iface_name) else {
+            return false;
+        };
+        // Substitute the interface's generic parameters with the args at the use site.
+        let subst: HashMap<String, Type> = iface_info
+            .generic_params
+            .iter()
+            .cloned()
+            .zip(iface_args.iter().cloned())
+            .collect();
+
+        let mut required: HashMap<String, MethodSig> = HashMap::new();
+        self.collect_interface_methods(&iface_name, &mut required);
+
+        for (mname, req_sig) in &required {
+            let req_params: Vec<Type> = req_sig
+                .params
+                .iter()
+                .map(|p| self.substitute(p, &subst))
+                .collect();
+            let req_ret = self.substitute(&req_sig.returns, &subst);
+            match self.lookup_type_method(tname, mname) {
+                Some(own) if own.params == req_params && own.returns == req_ret => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    /// Collect every method an interface requires, walking the `extends` chain.
+    fn collect_interface_methods(&self, iface: &str, out: &mut HashMap<String, MethodSig>) {
+        let Some(info) = self.interfaces.get(iface) else {
+            return;
+        };
+        for ext in &info.extends {
+            if let Some(base) = ext.base_name() {
+                self.collect_interface_methods(base, out);
+            }
+        }
+        for (name, sig) in &info.methods {
+            out.insert(name.clone(), sig.clone());
+        }
+    }
+
+    /// Look up a method on a type, walking the inheritance chain to `Object`.
+    fn lookup_type_method(&self, tname: &str, name: &str) -> Option<MethodSig> {
+        let mut cur = tname.to_string();
+        while let Some(info) = self.types.get(&cur) {
+            if let Some(sig) = info.methods.get(name) {
+                return Some(sig.clone());
+            }
+            if info.parent == "Object" {
+                return None;
+            }
+            cur = info.parent.clone();
+        }
+        None
+    }
+
+    /// Element type produced by iterating a concrete type that implements the
+    /// iterable protocol (A.11): it must provide both `next()` and `current()`,
+    /// and the element type is `current()`'s (substituted) return type. Returns
+    /// `None` when the type does not implement the full protocol.
+    pub fn iterable_element_of(&self, ty: &Type) -> Option<Type> {
+        let (name, subst) = match ty {
+            Type::User(n) => (n.clone(), HashMap::new()),
+            Type::Generic(n, targs) => {
+                let gp = self.types.get(n).map(|i| &i.generic_params);
+                let subst: HashMap<String, Type> = gp
+                    .map(|gp| gp.iter().cloned().zip(targs.iter().cloned()).collect())
+                    .unwrap_or_default();
+                (n.clone(), subst)
+            }
+            _ => return None,
+        };
+        self.lookup_type_method(&name, "next")?;
+        let current = self.lookup_type_method(&name, "current")?;
+        Some(self.substitute(&current.returns, &subst))
     }
 
     /// Returns true if interface `from` extends `to` transitively.
@@ -409,6 +533,8 @@ impl TypeCtx {
         match t {
             Type::Number | Type::String | Type::Boolean => Some(Type::Object),
             Type::Object | Type::Error | Type::Param(_) => None,
+            // A typed iterable is a structural protocol rooted at `Object`.
+            Type::Iterable(_) => Some(Type::Object),
             Type::User(name) | Type::Generic(name, _) => {
                 let info = self.types.get(name)?;
                 Some(match info.parent.as_str() {
@@ -430,6 +556,7 @@ impl TypeCtx {
                 name.clone(),
                 args.iter().map(|a| self.substitute(a, subst)).collect(),
             ),
+            Type::Iterable(elem) => Type::Iterable(Box::new(self.substitute(elem, subst))),
             _ => ty.clone(),
         }
     }

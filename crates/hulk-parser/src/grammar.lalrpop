@@ -97,6 +97,8 @@ IdentStr: &'input str = <lo:@L> IdentTok <hi:@R> => &input[lo..hi];
 // Type reference: either a simple name or a parameterized type (extension).
 // Examples: `Number`, `List[T]`, `Map[String, List[Number]]`.
 TypeRef: TypeRef = {
+    // Typed-iterable `T*` (A.11.2): an iterable whose elements have type `T`.
+    <inner:TypeRef> "*" => TypeRef::Iterable(Box::new(inner)),
     <name:IdentStr> "[" <args:Comma1<TypeRef>> "]" => TypeRef::Generic(name.to_string(), args),
     <name:IdentStr> => TypeRef::Simple(name.to_string()),
 };
@@ -327,17 +329,55 @@ FuncParam: Param = {
 // Expressions — precedence climbing
 // =====================================================================
 
-// Level 0: top-level expression (let, assign, control flow, or binary)
+// Level 0: top-level expression.
+//
+// HULK treats *everything* as an expression (A.1/A.5): `if`/`while`/`for`/`let`
+// can appear anywhere a value is expected, including as a binary operand
+// (`total + if (c) 1 else 0`, A.13). Encoding that naively makes the grammar
+// ambiguous (does the trailing `+ z` belong to the `if`'s `else` branch or to
+// the outer sum?). We resolve it the same way `if`/`else` dangling is resolved:
+// split expressions into "closed" and "open".
+//
+//   * A CLOSED expression is a pure binary/assignment tree; it never ends in a
+//     bare control-flow / `let` construct.
+//   * An OPEN expression is a binary chain whose RIGHTMOST operand is a bare
+//     control-flow / `let` (`CtrlAtom`).
+//
+// Crucially, every level of the open chain (`*C`) takes the CLOSED level as its
+// left operand, so the open levels are never left-recursive on themselves. That
+// means an open expression can only ever be a tail: the trailing operator is
+// forced to bind into the control-flow body, which is exactly HULK's greedy
+// "the branch extends as far right as possible" semantics — and it keeps the
+// grammar LALR(1) (the divergence is driven by the `if`/`while`/`for`/`let`
+// keywords, whose FIRST set is disjoint from any closed atom).
 pub Expr: Expr = {
-    LetExpr,
-    ControlOrBinary,
+    ClosedExpr,
+    OpenExpr,
 };
 
-// Control flow, assignment, OR binary expressions.
-// This is the "body" level for if/while/for: control flow and assignment can
-// nest directly here (`for (i in range(1,n)) f := f*i` relies on `:=` being a
-// valid loop body — A.9.2), but to use control flow inside binary
-// ops you still need parens. `let` bodies remain explicit (`let ... in ...`).
+// Closed: assignment or a pure binary expression (no bare control-flow tail).
+ClosedExpr: Expr = {
+    AssignExpr,
+    OrExpr,
+};
+
+// Open: a binary chain whose rightmost operand is a bare control-flow / `let`.
+OpenExpr: Expr = {
+    OrExprC,
+};
+
+// The bare control-flow / `let` constructs, reachable only at the open tail.
+CtrlAtom: Expr = {
+    IfExpr,
+    WhileExpr,
+    ForExpr,
+    LetExpr,
+};
+
+// Restricted form used ONLY for `let` binding initializers (`let x = <init>`).
+// It admits control flow and binary expressions but not a bare `let`, so a
+// nested `let` as an initializer still needs parens and the `in` keyword pairs
+// unambiguously with its `let`.
 ControlOrBinary: Expr = {
     IfExpr,
     WhileExpr,
@@ -584,6 +624,99 @@ CallOrIdentExpr: Expr = {
 };
 
 // =====================================================================
+// Open-tail expression chain
+//
+// Mirrors the closed precedence levels above, but every binary level takes the
+// CLOSED level as its left operand and bottoms out at `CtrlAtom`, so each `*C`
+// nonterminal always ends in a bare control-flow / `let`. See `Expr` for why
+// this is unambiguous and LALR(1)-friendly. The AST built is identical to the
+// closed levels — only the right-operand spine differs.
+// =====================================================================
+
+OrExprC: Expr = {
+    <lo:@L> <lhs:OrExpr> "|" <rhs:AndExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Or, Box::new(lhs), Box::new(rhs)) },
+    AndExprC,
+};
+
+AndExprC: Expr = {
+    <lo:@L> <lhs:AndExpr> "&" <rhs:NotExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::And, Box::new(lhs), Box::new(rhs)) },
+    NotExprC,
+};
+
+NotExprC: Expr = {
+    <lo:@L> "!" <e:NotExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::UnOp(UnOp::Not, Box::new(e)) },
+    CompareExprC,
+};
+
+CompareExprC: Expr = {
+    <lo:@L> <lhs:TypeOpExpr> "==" <rhs:TypeOpExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Eq, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:TypeOpExpr> "!=" <rhs:TypeOpExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Ne, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:TypeOpExpr> "<" <rhs:TypeOpExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Lt, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:TypeOpExpr> "<=" <rhs:TypeOpExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Le, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:TypeOpExpr> ">" <rhs:TypeOpExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Gt, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:TypeOpExpr> ">=" <rhs:TypeOpExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Ge, Box::new(lhs), Box::new(rhs)) },
+    TypeOpExprC,
+};
+
+// `is`/`as` take a type on the right, never an expression, so the open variant
+// just descends to the concat level.
+TypeOpExprC: Expr = {
+    ConcatExprC,
+};
+
+ConcatExprC: Expr = {
+    <lo:@L> <lhs:AddExpr> "@" <rhs:ConcatExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Concat, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:AddExpr> "@@" <rhs:ConcatExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::ConcatWs, Box::new(lhs), Box::new(rhs)) },
+    AddExprC,
+};
+
+AddExprC: Expr = {
+    <lo:@L> <lhs:AddExpr> "+" <rhs:MulExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Add, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:AddExpr> "-" <rhs:MulExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Sub, Box::new(lhs), Box::new(rhs)) },
+    MulExprC,
+};
+
+MulExprC: Expr = {
+    <lo:@L> <lhs:MulExpr> "*" <rhs:UnaryExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Mul, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:MulExpr> "/" <rhs:UnaryExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Div, Box::new(lhs), Box::new(rhs)) },
+    <lo:@L> <lhs:MulExpr> "%" <rhs:UnaryExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Mod, Box::new(lhs), Box::new(rhs)) },
+    UnaryExprC,
+};
+
+UnaryExprC: Expr = {
+    <lo:@L> "-" <e:UnaryExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::UnOp(UnOp::Neg, Box::new(e)) },
+    PowExprC,
+};
+
+// Base case of the open chain: the bare control-flow / `let` atom (or a power
+// whose exponent is open). There is intentionally no bare-`PostfixExpr` case —
+// closed operands always flow through the closed chain.
+PowExprC: Expr = {
+    <lo:@L> <base:PostfixExpr> "^" <exp:UnaryExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) },
+    <lo:@L> <base:PostfixExpr> "**" <exp:UnaryExprC> <hi:@R> =>
+        Expr { span: Span::new(lo, hi), kind: ExprKind::BinOp(BinOp::Pow, Box::new(base), Box::new(exp)) },
+    CtrlAtom,
+};
+
+// =====================================================================
 // Compound expressions (control flow)
 // =====================================================================
 
@@ -602,9 +735,9 @@ BlockExpr: Expr = {
 
 // If / elif / else (A.5)
 IfExpr: Expr = {
-    <lo:@L> "if" "(" <cond:Expr> ")" <then:ControlOrBinary>
-        <elifs:("elif" "(" <Expr> ")" <ControlOrBinary>)*>
-        "else" <else_:ControlOrBinary> <hi:@R> => {
+    <lo:@L> "if" "(" <cond:Expr> ")" <then:Expr>
+        <elifs:("elif" "(" <Expr> ")" <Expr>)*>
+        "else" <else_:Expr> <hi:@R> => {
         Expr {
             span: Span::new(lo, hi),
             kind: ExprKind::If(
@@ -619,7 +752,7 @@ IfExpr: Expr = {
 
 // While loop (A.6.1)
 WhileExpr: Expr = {
-    <lo:@L> "while" "(" <cond:Expr> ")" <body:ControlOrBinary> <hi:@R> => {
+    <lo:@L> "while" "(" <cond:Expr> ")" <body:Expr> <hi:@R> => {
         Expr {
             span: Span::new(lo, hi),
             kind: ExprKind::While(Box::new(cond), Box::new(body)),
@@ -629,7 +762,7 @@ WhileExpr: Expr = {
 
 // For loop (A.6.2)
 ForExpr: Expr = {
-    <lo:@L> "for" "(" <name:IdentStr> "in" <iter:Expr> ")" <body:ControlOrBinary> <hi:@R> => {
+    <lo:@L> "for" "(" <name:IdentStr> "in" <iter:Expr> ")" <body:Expr> <hi:@R> => {
         Expr {
             span: Span::new(lo, hi),
             kind: ExprKind::For(name.to_string(), Box::new(iter), Box::new(body)),

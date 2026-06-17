@@ -82,6 +82,10 @@ pub enum TypeRef {
     Simple(String),
     /// A generic type reference (e.g., `List[T]`, `Map[K, V]`).
     Generic(String, Vec<TypeRef>),
+    /// A typed-iterable reference written `T*` (A.11.2): "an iterable whose
+    /// elements have type `T`". Sugar for the `Iterable` protocol specialized
+    /// to element type `T`.
+    Iterable(Box<TypeRef>),
 }
 
 impl TypeRef {
@@ -89,6 +93,7 @@ impl TypeRef {
     pub fn base_name(&self) -> &str {
         match self {
             TypeRef::Simple(n) | TypeRef::Generic(n, _) => n,
+            TypeRef::Iterable(inner) => inner.base_name(),
         }
     }
 }
@@ -119,6 +124,7 @@ impl fmt::Display for TypeRef {
                 }
                 write!(f, "]")
             }
+            TypeRef::Iterable(inner) => write!(f, "{inner}*"),
         }
     }
 }
