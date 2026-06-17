@@ -47,12 +47,28 @@ pub struct Program {
 }
 ```
 
-El programa tiene forma: `Decl* Expr ;?`, donde cada `Decl` es una declaracion
+El programa tiene forma: `Decl* EntryExpr`, donde cada `Decl` es una declaracion
 de **interfaz**, **tipo** o **funcion** y pueden aparecer **en cualquier orden**
 (HULK A.3: el orden de declaracion es irrelevante). La regla `Program` parsea una
 lista `TopDecl*` (enum interno `TopDecl` en `lib.rs`) y luego la particiona en los
 vectores `interfaces`, `types` y `functions`. Esto permite, por ejemplo, declarar
 una `function` antes que un `type`.
+
+**Punto de entrada (`EntryExpr`).** Como HULK es un lenguaje de expresiones, el
+tope del programa es un **bloque implicito** (A.2.4): una secuencia de cero o mas
+sentencias terminadas en `;`, seguida de una expresion final, con un `;` final
+opcional — gramatica `(<Expr> ";")* <Expr> ";"?`. Reglas de desugaring:
+
+- **Una sola expresion** (`expr` o `expr;`) se devuelve tal cual: los programas de
+  una expresion producen un AST **byte-a-byte identico** al de antes.
+- **Una secuencia** (`a; b; c`) se reescribe a un `ExprKind::Block([a, b, c])`,
+  exactamente como un bloque `{ a; b; c }`; el valor del programa es la ultima
+  expresion. Esto hace valido `print(1); print(2);` en el tope **sin llaves**.
+
+La expresion final es **obligatoria** (la gramatica nunca acepta un `entry` vacio),
+asi que todo programa termina en una expresion, conforme a la spec. La construccion
+es LALR(1) sin conflictos (misma forma que el cuerpo de `BlockExpr`, con EOF como
+terminador en lugar de `}`).
 
 ---
 

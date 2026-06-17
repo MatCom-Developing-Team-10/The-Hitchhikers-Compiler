@@ -1,0 +1,9 @@
+// Top-level statement sequence WITHOUT braces. HULK is expression-based, so the
+// program body is an implicit block (A.2.4): a `;`-separated sequence of
+// statements whose value is the last expression. A bare `print(...); print(...);`
+// at the top level used to be a syntax error (the entry had to be a single
+// expression or an explicit `{ ... }` block); it is now accepted.
+function sq(x: Number): Number => x * x;
+print("start");
+print(sq(4));
+print("end");

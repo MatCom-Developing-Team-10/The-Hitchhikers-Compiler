@@ -119,7 +119,7 @@ GenericArgs: Vec<TypeRef> = {
 
 pub Program: Program = {
     // Declarations may appear in any order (A.3); partition them afterwards.
-    <decls:TopDecl*> <entry:Expr> ";"? => {
+    <decls:TopDecl*> <entry:EntryExpr> => {
         let mut interfaces = Vec::new();
         let mut types = Vec::new();
         let mut functions = Vec::new();
@@ -131,6 +131,26 @@ pub Program: Program = {
             }
         }
         Program { interfaces, types, functions, entry }
+    },
+};
+
+// The program's entry point. HULK is expression-based, so the top level is an
+// implicit expression block (A.2.4): zero or more `;`-terminated statements
+// followed by a final expression, with an optional trailing `;`. A lone
+// expression is returned as-is, so single-expression programs parse to byte-for-
+// byte identical ASTs; a sequence desugars to a `Block` whose value is the last
+// expression — exactly like a `{ ... }` block. This makes the common
+// `print(1); print(2);` valid at the top level without wrapping it in braces.
+// The trailing expression is mandatory, so a program always ends in an
+// expression (and an entry is never empty), matching the spec.
+EntryExpr: Expr = {
+    <lo:@L> <mut stmts:(<Expr> ";")*> <last:Expr> ";"? <hi:@R> => {
+        if stmts.is_empty() {
+            last
+        } else {
+            stmts.push(last);
+            Expr { span: Span::new(lo, hi), kind: ExprKind::Block(stmts) }
+        }
     },
 };
 
