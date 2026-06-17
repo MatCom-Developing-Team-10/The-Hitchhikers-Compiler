@@ -214,6 +214,18 @@ pub enum Instr {
     /// Pop value; assert it conforms to `type_name`; push the same value.
     /// Errors with `InvalidCast` if the check fails.
     AsType(String),
+
+    // --- Vectors (A.12) ---
+    /// Pop `n` values (top is the last element) and push a fresh `Vector`
+    /// object holding them, with elements stored under string keys `"0".."n-1"`
+    /// and the length under `"__len"`.
+    MakeVector(usize),
+    /// Pop the index (a `Number`), pop a `Vector` object, push the element at
+    /// that index. Errors on a non-integer or out-of-bounds index.
+    Index,
+    /// Pop a `Vector` object (top), pop a value; append the value to the vector
+    /// (growing `"__len"`). Pushes nothing.
+    VecPush,
 }
 
 // ── IR program structures ─────────────────────────────────────────────────────
@@ -398,7 +410,13 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
             let iter_var = format!("__for_iter_{id}");
 
             out.push(Instr::BeginScope);
-            lower_inner(iter_expr, out, ctx); // push iterator object
+            lower_inner(iter_expr, out, ctx); // push the iterable
+            // Obtain a fresh iterator via `iter()`. Iterables that are their own
+            // iterator (e.g. `range(...)` and user types following the A.11
+            // protocol) do not define `iter()`; the VM treats a missing `iter()`
+            // as the identity, so they keep working. Vectors return a fresh
+            // cursor object, so re-iterating the same vector works correctly.
+            out.push(Instr::CallMethod("iter".to_string(), 0));
             out.push(Instr::BindVar(iter_var.clone())); // bind to hidden var
 
             out.push(Instr::PushNil); // default result if loop never executes
@@ -496,6 +514,66 @@ fn lower_inner(expr: &Expr, out: &mut Vec<Instr>, ctx: &mut Ctx) {
         ExprKind::As(expr, type_ref) => {
             lower_inner(expr, out, ctx);
             out.push(Instr::AsType(type_ref.base_name().to_string()));
+        }
+
+        // ── Vectors (A.12) ─────────────────────────────────────────────────────
+
+        // [e0, e1, ...] → push each element, then MakeVector(n).
+        ExprKind::Vector(elems) => {
+            for elem in elems {
+                lower_inner(elem, out, ctx);
+            }
+            out.push(Instr::MakeVector(elems.len()));
+        }
+
+        // vector[index] → lower vector, lower index, Index.
+        ExprKind::Index(obj, idx) => {
+            lower_inner(obj, out, ctx);
+            lower_inner(idx, out, ctx);
+            out.push(Instr::Index);
+        }
+
+        // [elem | x in iterable] (A.12.2) desugars to building a fresh vector by
+        // appending `elem` for every `x` drawn from `iterable`:
+        //   acc = []
+        //   for (x in iterable) acc.push(elem)
+        //   acc
+        ExprKind::VectorComp(elem, var, iter_expr) => {
+            let id = ctx.next();
+            let start = format!("comp_start_{id}");
+            let end = format!("comp_end_{id}");
+            let acc_var = format!("__comp_acc_{id}");
+            let iter_var = format!("__comp_iter_{id}");
+
+            out.push(Instr::BeginScope);
+            // acc = empty vector
+            out.push(Instr::MakeVector(0));
+            out.push(Instr::BindVar(acc_var.clone()));
+            // iterator = iterable.iter()
+            lower_inner(iter_expr, out, ctx);
+            out.push(Instr::CallMethod("iter".to_string(), 0));
+            out.push(Instr::BindVar(iter_var.clone()));
+
+            out.push(Instr::Label(start.clone()));
+            out.push(Instr::LoadVar(iter_var.clone()));
+            out.push(Instr::CallMethod("next".to_string(), 0));
+            out.push(Instr::JumpIfFalse(end.clone()));
+
+            out.push(Instr::BeginScope);
+            out.push(Instr::LoadVar(iter_var.clone()));
+            out.push(Instr::CallMethod("current".to_string(), 0));
+            out.push(Instr::BindVar(var.clone()));
+            // acc.push(elem): push value, then acc, then VecPush.
+            lower_inner(elem, out, ctx);
+            out.push(Instr::LoadVar(acc_var.clone()));
+            out.push(Instr::VecPush);
+            out.push(Instr::EndScope);
+
+            out.push(Instr::Jump(start));
+            out.push(Instr::Label(end));
+            // result is the accumulator
+            out.push(Instr::LoadVar(acc_var));
+            out.push(Instr::EndScope);
         }
     }
 }
@@ -932,6 +1010,123 @@ fn register_range_builtins(
     );
 }
 
+/// Register the built-in `Vector` and `VectorIter` types (A.12).
+///
+/// A `Vector` is a heap object whose elements live under the string keys
+/// `"0".."n-1"` with the length under `"__len"` (built by [`Instr::MakeVector`]).
+/// It provides `size(): Number` and `iter()`, the latter returning a fresh
+/// `VectorIter` cursor so the same vector can be iterated more than once. The
+/// `VectorIter` implements the A.11 iterable protocol (`next()`/`current()`)
+/// over its backing vector via [`Instr::Index`].
+fn register_vector_builtins(
+    funcs: &mut HashMap<String, IrFunc>,
+    types: &mut HashMap<String, IrTypeInfo>,
+) {
+    // Vector.size(): self.__len
+    funcs.insert(
+        "__vec_size".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("__len".to_string()),
+                Instr::Ret,
+            ],
+        },
+    );
+
+    // Vector.iter(): a fresh VectorIter { __vec = self, __cursor = -1 }
+    funcs.insert(
+        "__vec_iter".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::NewObject("__VectorIter".to_string()),
+                Instr::BeginScope,
+                Instr::BindVar("__it".to_string()),
+                // __it.__vec = self
+                Instr::LoadVar("self".to_string()),
+                Instr::LoadVar("__it".to_string()),
+                Instr::SetField("__vec".to_string()),
+                Instr::Pop,
+                // __it.__cursor = -1
+                Instr::PushNum(-1.0),
+                Instr::LoadVar("__it".to_string()),
+                Instr::SetField("__cursor".to_string()),
+                Instr::Pop,
+                Instr::LoadVar("__it".to_string()),
+                Instr::EndScope,
+                Instr::Ret,
+            ],
+        },
+    );
+
+    // VectorIter.next(): self.__cursor += 1; return self.__cursor < self.__vec.__len
+    funcs.insert(
+        "__veciter_next".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("__cursor".to_string()),
+                Instr::PushNum(1.0),
+                Instr::Add,
+                Instr::LoadVar("self".to_string()),
+                Instr::SetField("__cursor".to_string()),
+                Instr::Pop,
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("__cursor".to_string()),
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("__vec".to_string()),
+                Instr::GetField("__len".to_string()),
+                Instr::Lt,
+                Instr::Ret,
+            ],
+        },
+    );
+
+    // VectorIter.current(): self.__vec[self.__cursor]
+    funcs.insert(
+        "__veciter_current".to_string(),
+        IrFunc {
+            params: vec!["self".to_string()],
+            body: vec![
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("__vec".to_string()),
+                Instr::LoadVar("self".to_string()),
+                Instr::GetField("__cursor".to_string()),
+                Instr::Index,
+                Instr::Ret,
+            ],
+        },
+    );
+
+    types.insert(
+        "__Vector".to_string(),
+        IrTypeInfo {
+            parent: "Object".to_string(),
+            methods: [
+                ("size".to_string(), "__vec_size".to_string()),
+                ("iter".to_string(), "__vec_iter".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    );
+    types.insert(
+        "__VectorIter".to_string(),
+        IrTypeInfo {
+            parent: "Object".to_string(),
+            methods: [
+                ("next".to_string(), "__veciter_next".to_string()),
+                ("current".to_string(), "__veciter_current".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    );
+}
+
 /// Lower a complete [`Program`] to an [`IrProgram`].
 pub fn lower_program(program: &Program) -> IrProgram {
     let mut funcs: HashMap<String, IrFunc> = program
@@ -972,6 +1167,7 @@ pub fn lower_program(program: &Program) -> IrProgram {
     }
 
     register_range_builtins(&mut funcs, &mut types);
+    register_vector_builtins(&mut funcs, &mut types);
 
     let mut entry = Vec::new();
     let mut ctx = Ctx::new();

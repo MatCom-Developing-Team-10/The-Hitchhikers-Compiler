@@ -99,6 +99,9 @@ IdentStr: &'input str = <lo:@L> IdentTok <hi:@R> => &input[lo..hi];
 TypeRef: TypeRef = {
     // Typed-iterable `T*` (A.11.2): an iterable whose elements have type `T`.
     <inner:TypeRef> "*" => TypeRef::Iterable(Box::new(inner)),
+    // Vector `T[]` (A.12.3): a concrete vector of `T`. Empty brackets after a
+    // type name (the `]` lookahead disambiguates from a generic argument list).
+    <name:IdentStr> "[" "]" => TypeRef::Vector(Box::new(TypeRef::Simple(name.to_string()))),
     <name:IdentStr> "[" <args:Comma1<TypeRef>> "]" => TypeRef::Generic(name.to_string(), args),
     <name:IdentStr> => TypeRef::Simple(name.to_string()),
 };
@@ -585,6 +588,13 @@ PostfixExpr: Expr = {
             kind: ExprKind::GetField(Box::new(obj), name.to_string()),
         }
     },
+    // Indexing: expr[index] (A.12.1)
+    <lo:@L> <obj:PostfixExpr> "[" <idx:Expr> "]" <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::Index(Box::new(obj), Box::new(idx)),
+        }
+    },
     AtomExpr,
 };
 
@@ -617,8 +627,33 @@ AtomExpr: Expr = {
     BlockExpr,
     // New expression
     NewExpr,
+    // Vector literal / comprehension (A.12)
+    VectorExpr,
     // Function call, base(), self, or plain identifier
     CallOrIdentExpr,
+};
+
+// Vector literal `[e0, e1, ...]` and comprehension `[elem | x in iter]` (A.12).
+//
+// Elements are parsed at the `AndExpr` level rather than full `Expr` so that a
+// top-level `|` is unambiguously the comprehension separator and never the
+// logical-or operator. (`&` is still allowed inside an element; only a bare
+// top-level `|` must be parenthesized, e.g. `[(a | b)]`.)
+VectorExpr: Expr = {
+    <lo:@L> "[" "]" <hi:@R> => {
+        Expr { span: Span::new(lo, hi), kind: ExprKind::Vector(vec![]) }
+    },
+    <lo:@L> "[" <first:AndExpr> <rest:("," <AndExpr>)*> "]" <hi:@R> => {
+        let mut elems = vec![first];
+        elems.extend(rest);
+        Expr { span: Span::new(lo, hi), kind: ExprKind::Vector(elems) }
+    },
+    <lo:@L> "[" <elem:AndExpr> "|" <var:IdentStr> "in" <iter:Expr> "]" <hi:@R> => {
+        Expr {
+            span: Span::new(lo, hi),
+            kind: ExprKind::VectorComp(Box::new(elem), var.to_string(), Box::new(iter)),
+        }
+    },
 };
 
 // Function call, base(), self, or plain identifier

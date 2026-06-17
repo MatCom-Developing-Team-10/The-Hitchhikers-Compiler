@@ -54,6 +54,9 @@ pub enum VmError {
     /// AsType assertion failed.
     #[error("cannot cast {from} to {to}")]
     InvalidCast { from: String, to: String },
+    /// A vector was indexed out of bounds or with a non-integer index.
+    #[error("vector index out of bounds: {index} (length {len})")]
+    IndexOutOfBounds { index: f64, len: usize },
     /// A jump targeted a label that does not exist in the current code block.
     /// Signals malformed bytecode (an IR-lowering bug) rather than a user error.
     #[error("internal error: jump to undefined label `{0}`")]
@@ -208,7 +211,25 @@ impl Vm {
     /// to recover the runtime type name.
     fn format_value(&self, v: &Value) -> String {
         match v {
-            Value::Object(id) => format!("<{} object>", self.heap.get(*id).type_name),
+            Value::Object(id) => {
+                let obj = self.heap.get(*id);
+                if obj.type_name == "__Vector" {
+                    // Render a vector as `[e0, e1, ...]` (A.12).
+                    let len = match obj.fields.get("__len") {
+                        Some(Value::Num(n)) => *n as usize,
+                        _ => 0,
+                    };
+                    let items: Vec<String> = (0..len)
+                        .map(|i| match obj.fields.get(&i.to_string()) {
+                            Some(elem) => self.format_value(elem),
+                            None => "nil".to_string(),
+                        })
+                        .collect();
+                    format!("[{}]", items.join(", "))
+                } else {
+                    format!("<{} object>", obj.type_name)
+                }
+            }
             other => format!("{other}"),
         }
     }
@@ -490,7 +511,19 @@ impl Vm {
                     args.reverse();
 
                     let type_name = self.heap.get(obj_id).type_name.clone();
-                    let func_name = self.resolve_method(&type_name, &method_name)?;
+                    let func_name = match self.resolve_method(&type_name, &method_name) {
+                        Ok(name) => name,
+                        // An iterable that is its own iterator (e.g. `range(...)`
+                        // and A.11 user iterables) defines no `iter()`. Treat a
+                        // missing `iter()` as the identity so the `for` lowering
+                        // works uniformly across vectors and bare iterables.
+                        Err(_) if method_name == "iter" && argc == 0 => {
+                            self.stack.push(Value::Object(obj_id));
+                            ip += 1;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
 
                     // Prepend self to the argument list.
                     let mut all_args = vec![Value::Object(obj_id)];
@@ -540,6 +573,61 @@ impl Vm {
                             to: target.clone(),
                         });
                     }
+                }
+
+                // --- Vectors (A.12) ---
+
+                // Pop `n` values and build a `Vector` object holding them.
+                Instr::MakeVector(n) => {
+                    let n = *n;
+                    let mut elems: Vec<Value> =
+                        (0..n).map(|_| self.pop()).collect::<Result<Vec<_>, _>>()?;
+                    elems.reverse();
+                    let mut fields = HashMap::new();
+                    for (i, v) in elems.into_iter().enumerate() {
+                        fields.insert(i.to_string(), v);
+                    }
+                    fields.insert("__len".to_string(), Value::Num(n as f64));
+                    let id = self.heap.alloc(Object {
+                        type_name: "__Vector".to_string(),
+                        fields,
+                    });
+                    self.stack.push(Value::Object(id));
+                    self.maybe_gc();
+                }
+
+                // Pop index, pop vector; push the element at that index.
+                Instr::Index => {
+                    let index = self.pop_num()?;
+                    let id = self.pop_object()?;
+                    let obj = self.heap.get(id);
+                    let len = match obj.fields.get("__len") {
+                        Some(Value::Num(n)) => *n as usize,
+                        _ => return Err(VmError::UndefinedField("__len".to_string())),
+                    };
+                    if index < 0.0 || index.fract() != 0.0 || (index as usize) >= len {
+                        return Err(VmError::IndexOutOfBounds { index, len });
+                    }
+                    let val = obj
+                        .fields
+                        .get(&(index as usize).to_string())
+                        .cloned()
+                        .ok_or(VmError::IndexOutOfBounds { index, len })?;
+                    self.stack.push(val);
+                }
+
+                // Pop vector (top), pop value; append value, grow `__len`.
+                Instr::VecPush => {
+                    let id = self.pop_object()?;
+                    let val = self.pop()?;
+                    let obj = self.heap.get_mut(id);
+                    let len = match obj.fields.get("__len") {
+                        Some(Value::Num(n)) => *n as usize,
+                        _ => return Err(VmError::UndefinedField("__len".to_string())),
+                    };
+                    obj.fields.insert(len.to_string(), val);
+                    obj.fields
+                        .insert("__len".to_string(), Value::Num((len + 1) as f64));
                 }
             }
             ip += 1;

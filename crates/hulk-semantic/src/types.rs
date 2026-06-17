@@ -28,6 +28,9 @@ pub enum Type {
     /// A typed iterable `T*` (A.11.2): any value implementing the iterable
     /// protocol whose `current()` yields the boxed element type.
     Iterable(Box<Type>),
+    /// A vector `T[]` (A.12): a concrete iterable of `T` that also supports
+    /// indexing and `size()`.
+    Vector(Box<Type>),
     /// Poison value — propagated after a reported error to silence cascades.
     Error,
 }
@@ -52,6 +55,7 @@ impl Type {
                 s
             }
             Type::Iterable(elem) => format!("{}*", elem.name()),
+            Type::Vector(elem) => format!("{}[]", elem.name()),
             Type::Error => "<error>".into(),
         }
     }
@@ -235,6 +239,7 @@ impl TypeCtx {
             TypeRef::Iterable(inner) => {
                 Some(Type::Iterable(Box::new(self.resolve_type_ref(inner)?)))
             }
+            TypeRef::Vector(inner) => Some(Type::Vector(Box::new(self.resolve_type_ref(inner)?))),
             TypeRef::Generic(name, args) => {
                 let resolved_args: Vec<Type> = args
                     .iter()
@@ -262,6 +267,9 @@ impl TypeCtx {
                 }
             }
             TypeRef::Iterable(inner) => Some(Type::Iterable(Box::new(
+                self.resolve_type_ref_in_scope(inner, scope)?,
+            ))),
+            TypeRef::Vector(inner) => Some(Type::Vector(Box::new(
                 self.resolve_type_ref_in_scope(inner, scope)?,
             ))),
             TypeRef::Generic(name, args) => {
@@ -313,12 +321,18 @@ impl TypeCtx {
         // that implements the iterable protocol with a conforming `current()`.
         if let Type::Iterable(elem) = b {
             return match a {
-                Type::Iterable(ea) => self.conforms(ea, elem),
+                Type::Iterable(ea) | Type::Vector(ea) => self.conforms(ea, elem),
                 Type::User(_) | Type::Generic(_, _) => self
                     .iterable_element_of(a)
                     .is_some_and(|e| self.conforms(&e, elem)),
                 _ => false,
             };
+        }
+        // A vector `T[]` conforms to another vector only invariantly (handled by
+        // the `a == b` check above); to anything else it conforms only via
+        // `Object` (handled above) or `T*` (handled above).
+        if matches!(a, Type::Vector(_)) {
+            return false;
         }
         // An iterable on the left conforms to nothing else (beyond `Object`,
         // handled above, and another iterable, handled above).
@@ -533,8 +547,8 @@ impl TypeCtx {
         match t {
             Type::Number | Type::String | Type::Boolean => Some(Type::Object),
             Type::Object | Type::Error | Type::Param(_) => None,
-            // A typed iterable is a structural protocol rooted at `Object`.
-            Type::Iterable(_) => Some(Type::Object),
+            // A typed iterable / vector is a structural protocol rooted at `Object`.
+            Type::Iterable(_) | Type::Vector(_) => Some(Type::Object),
             Type::User(name) | Type::Generic(name, _) => {
                 let info = self.types.get(name)?;
                 Some(match info.parent.as_str() {
@@ -557,6 +571,7 @@ impl TypeCtx {
                 args.iter().map(|a| self.substitute(a, subst)).collect(),
             ),
             Type::Iterable(elem) => Type::Iterable(Box::new(self.substitute(elem, subst))),
+            Type::Vector(elem) => Type::Vector(Box::new(self.substitute(elem, subst))),
             _ => ty.clone(),
         }
     }

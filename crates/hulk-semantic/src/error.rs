@@ -104,6 +104,9 @@ pub enum SemError {
         "type `{ty}` is not iterable (the Iterable protocol requires both `next(): Boolean` and `current()`)"
     )]
     NotIterable { ty: String, span: Span },
+
+    #[error("type `{ty}` is not indexable (only vectors `T[]` support `[]`)")]
+    NotIndexable { ty: String, span: Span },
 }
 
 impl SemError {
@@ -131,7 +134,8 @@ impl SemError {
             | SemError::MissingInterfaceMethod { span, .. }
             | SemError::InterfaceSignatureMismatch { span, .. }
             | SemError::CannotInstantiateInterface { span, .. }
-            | SemError::NotIterable { span, .. } => *span,
+            | SemError::NotIterable { span, .. }
+            | SemError::NotIndexable { span, .. } => *span,
         }
     }
 }

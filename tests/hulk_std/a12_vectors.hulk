@@ -1,0 +1,6 @@
+// A.12.1 — Explicit vectors: literal, indexing, size(), and for-iteration.
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9] in {
+    print(numbers[7]);        // indexing (0-based) -> 8
+    print(numbers.size());    // size -> 9
+    for (x in numbers) print(x);
+};

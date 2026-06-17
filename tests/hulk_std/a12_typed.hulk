@@ -1,0 +1,15 @@
+// A.12.3 — Typing vectors: `Number[]` (indexable) vs `Number*` (iterable only).
+function mean(numbers: Number[]): Number =>
+    let total = 0 in {
+        for (x in numbers) total := total + x;
+        total / numbers.size();
+    };
+function sum(numbers: Number*): Number =>
+    let total = 0 in {
+        for (x in numbers) total := total + x;
+        total;
+    };
+let v = [1, 2, 3, 4, 5] in {
+    print(sum(v));
+    print(mean(v));
+};

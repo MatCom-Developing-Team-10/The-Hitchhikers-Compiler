@@ -6,7 +6,7 @@
 - `crates/hulk-parser/src/lib.rs`
 - `crates/hulk-parser/src/grammar.lalrpop`
 **Generador:** [LALRpop](https://github.com/lalrpop/lalrpop) v0.23
-**Ultima actualizacion:** 2026-06-16 (control de flujo como operando vía gramatica abierta/cerrada; iterable tipado `T*`)
+**Ultima actualizacion:** 2026-06-17 (vectores A.12: literal `[..]`, comprehension `[e | x in it]`, indexacion `v[i]`, tipo `T[]`)
 
 > Este archivo es la fuente de verdad sobre el parser y el AST. Cualquier cambio en `hulk-parser` o `hulk-ast` **DEBE** reflejarse aqui en el mismo commit.
 
@@ -184,7 +184,7 @@ Cada nodo del AST lleva su `Span` para mensajes de error con localizacion.
 
 ---
 
-## Tabla de ExprKind (27 variantes)
+## Tabla de ExprKind (30 variantes)
 
 ### Literales
 
@@ -254,6 +254,14 @@ Cada nodo del AST lleva su `Span` para mensajes de error con localizacion.
 | `Is(Box<Expr>, String)` | `expr is Type` | Comprobacion de tipo en runtime |
 | `As(Box<Expr>, String)` | `expr as Type` | Conversion de tipo (downcast) |
 
+### Vectores (A.12)
+
+| Variante | Sintaxis HULK | Descripcion |
+|----------|--------------|-------------|
+| `Vector(Vec<Expr>)` | `[1, 2, 3]` | Vector explicito (A.12.1) |
+| `VectorComp(Box<Expr>, String, Box<Expr>)` | `[x*x \| x in it]` | Vector implicito / generator pattern (A.12.2). Campos: expr elemento, variable, iterable |
+| `Index(Box<Expr>, Box<Expr>)` | `v[i]` | Indexacion (A.12.1) |
+
 ---
 
 ## Operadores binarios — BinOp (16 variantes)
@@ -295,7 +303,7 @@ De **mayor** a **menor** precedencia:
 | Nivel | Categoria | Operadores / construcciones | Asociatividad |
 |-------|-----------|----------------------------|---------------|
 | 12 | Atomos | Literales, `self`, `new`, identificadores, `(expr)` | — |
-| 11 | Postfix | `.field`, `.method(args)` | Izquierda |
+| 11 | Postfix | `.field`, `.method(args)`, `v[i]` (indexacion) | Izquierda |
 | 10 | Potencia | `^`, `**` | **Derecha** |
 | 9 | Unario | `-expr` | Derecha |
 | 8 | Multiplicativo | `*`, `/`, `%` | Izquierda |
@@ -436,6 +444,7 @@ pub enum TypeRef {
     Simple(String),                    // Number, Point, T
     Generic(String, Vec<TypeRef>),     // List[Number], Map[String, List[Number]]
     Iterable(Box<TypeRef>),            // Number*  (iterable tipado, A.11.2)
+    Vector(Box<TypeRef>),              // Number[] (vector tipado, A.12.3)
 }
 ```
 
@@ -504,3 +513,39 @@ x as Map[String, Point]
 Los argumentos genericos se **borran** durante el lowering a IR: `new List[Number](42)` se compila identicamente a `new List(42)` — la VM no distingue instancias por argumentos de tipo. La invariancia entre `List[Number]` y `List[String]` se enforza solo en el type checker (`hulk-semantic`).
 
 Ver [docs/EXTENSIONS.md](EXTENSIONS.md) para mas detalle y comparativas.
+
+---
+
+## Vectores (A.12)
+
+Soporte completo para vectores del estandar HULK.
+
+### Sintaxis
+
+```hulk
+let v = [1, 2, 3, 4, 5] in print(v[7]);   // literal explicito + indexacion (A.12.1)
+let sq = [x * x | x in range(1, 6)] in v;  // generator pattern (A.12.2)
+function mean(xs: Number[]): Number => ...; // tipo vector `T[]` (A.12.3)
+function sum(xs: Number*): Number => ...;   // tipo iterable `T*` (A.11.2)
+```
+
+### Nodos AST
+
+- `ExprKind::Vector(Vec<Expr>)`, `ExprKind::VectorComp(elem, var, iter)`, `ExprKind::Index(obj, idx)`.
+- `TypeRef::Vector(Box<TypeRef>)` para la anotacion `T[]`.
+
+### Reglas de gramatica
+
+| Regla | Descripcion |
+|-------|-------------|
+| `VectorExpr` | Literal `[...]`, vacio `[]`, o comprehension `[e \| x in it]` |
+| `PostfixExpr` (`obj "[" idx "]"`) | Indexacion como postfijo (mismo nivel que `.metodo()`) |
+| `TypeRef` (`name "[" "]"`) | Tipo vector `T[]` (lookahead `]` lo distingue de `T[args]` generico) |
+
+**Desambiguacion del `|`:** los elementos de un vector se parsean a nivel `AndExpr` (no `Expr` completo), de modo que un `|` de tope nunca es el operador OR sino el separador de la comprehension. Un elemento que necesite un OR de tope debe ir entre parentesis: `[(a | b)]`. El `&` (AND) si se permite directamente. Esto mantiene la gramatica LALR(1) con el `|` simple que usa el libro.
+
+### Semantica y runtime
+
+- **Tipado:** `Type::Vector(Box<Type>)`. Un literal toma como tipo de elemento el LCA de sus elementos; `[]` es `Object[]`. `T[]` conforma a `T*` y a `Object` (invariante respecto a otros vectores). `v[i]` exige `i: Number` y devuelve el tipo de elemento. `.size()` solo existe sobre `T[]`, no sobre `T*` (igual que el libro).
+- **Protocolo iterable:** el `for` ahora llama `iter()` sobre el iterable. Un vector devuelve un `VectorIter` fresco (permite re-iterar el mismo vector y bucles anidados); `range(...)` y los iterables de usuario A.11 no definen `iter()`, asi que la VM la trata como identidad (compatibilidad total).
+- **Lowering / VM:** un vector es un `Object` de tipo `Vector` con campos `"0".."n-1"` + `"__len"`, construido por `Instr::MakeVector(n)`; `Instr::Index` y `Instr::VecPush` implementan indexacion y append. Al ser campos normales, el GC los traza sin cambios.

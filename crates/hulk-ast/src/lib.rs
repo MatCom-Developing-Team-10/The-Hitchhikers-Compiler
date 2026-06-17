@@ -86,6 +86,10 @@ pub enum TypeRef {
     /// elements have type `T`". Sugar for the `Iterable` protocol specialized
     /// to element type `T`.
     Iterable(Box<TypeRef>),
+    /// A vector type written `T[]` (A.12.3): a concrete vector whose elements
+    /// have type `T`. Unlike `T*`, a `T[]` value also supports indexing and
+    /// `size()`.
+    Vector(Box<TypeRef>),
 }
 
 impl TypeRef {
@@ -93,7 +97,7 @@ impl TypeRef {
     pub fn base_name(&self) -> &str {
         match self {
             TypeRef::Simple(n) | TypeRef::Generic(n, _) => n,
-            TypeRef::Iterable(inner) => inner.base_name(),
+            TypeRef::Iterable(inner) | TypeRef::Vector(inner) => inner.base_name(),
         }
     }
 }
@@ -125,6 +129,7 @@ impl fmt::Display for TypeRef {
                 write!(f, "]")
             }
             TypeRef::Iterable(inner) => write!(f, "{inner}*"),
+            TypeRef::Vector(inner) => write!(f, "{inner}[]"),
         }
     }
 }
@@ -323,6 +328,15 @@ pub enum ExprKind {
     Is(Box<Expr>, TypeRef),
     /// Downcast: `expr as TypeName`.
     As(Box<Expr>, TypeRef),
+
+    // -- Vectors (A.12) --
+    /// Explicit vector literal: `[e0, e1, ...]` (A.12.1).
+    Vector(Vec<Expr>),
+    /// Implicit vector / generator pattern: `[elem | var in iterable]` (A.12.2).
+    /// Fields: element expression, bound variable name, source iterable.
+    VectorComp(Box<Expr>, String, Box<Expr>),
+    /// Indexing: `vector[index]` (A.12.1).
+    Index(Box<Expr>, Box<Expr>),
 }
 
 /// Binary operators (A.2.1, A.2.2, A.5).

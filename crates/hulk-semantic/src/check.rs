@@ -779,7 +779,7 @@ impl Checker {
     /// type, so it returns `None` and the caller falls back to `Number`.
     fn iterator_element_type(&self, iter_ty: &Type) -> Option<Type> {
         let (name, subst) = match iter_ty {
-            Type::Iterable(elem) => return Some((**elem).clone()),
+            Type::Iterable(elem) | Type::Vector(elem) => return Some((**elem).clone()),
             Type::User(n) => (n.clone(), HashMap::new()),
             Type::Generic(n, targs) => {
                 let info_params = if self.ctx.is_interface(n) {
@@ -1299,6 +1299,21 @@ impl Checker {
                     self.collect_param_constraints(a, active, acc);
                 }
             }
+            ExprKind::Vector(elems) => {
+                for x in elems {
+                    self.collect_param_constraints(x, active, acc);
+                }
+            }
+            ExprKind::VectorComp(elem, var, iter) => {
+                self.collect_param_constraints(iter, active, acc);
+                let mut inner = active.clone();
+                inner.remove(var);
+                self.collect_param_constraints(elem, &inner, acc);
+            }
+            ExprKind::Index(obj, idx) => {
+                self.collect_param_constraints(obj, active, acc);
+                self.collect_param_constraints(idx, active, acc);
+            }
             ExprKind::Number(_)
             | ExprKind::String(_)
             | ExprKind::Bool(_)
@@ -1548,6 +1563,27 @@ impl Checker {
             ExprKind::MethodCall(recv, name, args) => {
                 let rt = self.check_expr(env, recv);
                 let arg_tys: Vec<Type> = args.iter().map(|a| self.check_expr(env, a)).collect();
+                // Builtin vector methods (A.12): a vector `T[]` provides
+                // `size(): Number` plus the iterable protocol (`next(): Boolean`,
+                // `current(): T`).
+                if let Type::Vector(elem) = &rt {
+                    let builtin = match name.as_str() {
+                        "size" => Some((vec![], Type::Number)),
+                        "next" => Some((vec![], Type::Boolean)),
+                        "current" => Some((vec![], (**elem).clone())),
+                        _ => None,
+                    };
+                    if let Some((params, returns)) = builtin {
+                        self.check_args(&params, &arg_tys, args, e.span);
+                        return returns;
+                    }
+                    self.errors.push(SemError::NoSuchMethod {
+                        ty: rt.name(),
+                        name: name.clone(),
+                        span: e.span,
+                    });
+                    return Type::Error;
+                }
                 let (sig, subst) = match &rt {
                     Type::User(tn) => {
                         if self.ctx.is_interface(tn) {
@@ -1812,8 +1848,8 @@ impl Checker {
                     // `Object` is the escape hatch for `range(...)` and other
                     // runtime-only iterables; bind the element as `Number`.
                     Type::Object => Type::Number,
-                    // A typed iterable `T*` binds the element directly as `T`.
-                    Type::Iterable(elem) => (**elem).clone(),
+                    // A typed iterable `T*` or vector `T[]` binds the element as `T`.
+                    Type::Iterable(elem) | Type::Vector(elem) => (**elem).clone(),
                     // A user type/interface is iterable only if it provides the
                     // iterator protocol (probed via `current()`).
                     Type::User(_) | Type::Generic(_, _) => {
@@ -2000,6 +2036,77 @@ impl Checker {
                     None => {
                         self.errors
                             .push(SemError::BaseNoParentMethod { span: e.span });
+                        Type::Error
+                    }
+                }
+            }
+
+            // ── Vectors (A.12) ──────────────────────────────────────────────
+            ExprKind::Vector(elems) => {
+                // The element type is the lowest common ancestor of every
+                // element's type. An empty literal `[]` is `Object[]`.
+                let mut elem_ty: Option<Type> = None;
+                for x in elems {
+                    let xt = self.check_expr(env, x);
+                    elem_ty = Some(match elem_ty {
+                        None => xt,
+                        Some(acc) => self.ctx.lca(&acc, &xt),
+                    });
+                }
+                Type::Vector(Box::new(elem_ty.unwrap_or(Type::Object)))
+            }
+
+            ExprKind::VectorComp(elem, var, iter) => {
+                let iter_ty = self.check_expr(env, iter);
+                let bound = match &iter_ty {
+                    Type::Error => Type::Error,
+                    Type::Object => Type::Number,
+                    Type::Iterable(t) | Type::Vector(t) => (**t).clone(),
+                    Type::User(_) | Type::Generic(_, _) => {
+                        match self.iterator_element_type(&iter_ty) {
+                            Some(t) => t,
+                            None => {
+                                self.errors.push(SemError::NotIterable {
+                                    ty: iter_ty.name(),
+                                    span: iter.span,
+                                });
+                                Type::Error
+                            }
+                        }
+                    }
+                    _ => {
+                        self.errors.push(SemError::NotIterable {
+                            ty: iter_ty.name(),
+                            span: iter.span,
+                        });
+                        Type::Error
+                    }
+                };
+                env.enter();
+                env.define(
+                    var,
+                    Binding {
+                        ty: bound,
+                        span: e.span,
+                    },
+                );
+                let elem_ty = self.check_expr(env, elem);
+                env.leave();
+                Type::Vector(Box::new(elem_ty))
+            }
+
+            ExprKind::Index(obj, idx) => {
+                let ot = self.check_expr(env, obj);
+                let it = self.check_expr(env, idx);
+                self.require(&it, &Type::Number, idx.span);
+                match &ot {
+                    Type::Vector(elem) => (**elem).clone(),
+                    Type::Error => Type::Error,
+                    _ => {
+                        self.errors.push(SemError::NotIndexable {
+                            ty: ot.name(),
+                            span: obj.span,
+                        });
                         Type::Error
                     }
                 }
