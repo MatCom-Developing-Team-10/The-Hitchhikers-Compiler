@@ -119,7 +119,8 @@ principal. Las expresiones se modelan con un enum `ExprKind` de alrededor de
 veintidós variantes que cubren literales, operaciones binarias y unarias,
 variables, bloques, `let`, `if`/`elif`/`else`, `while`, `for`, llamadas a
 funciones y métodos, acceso y asignación de atributos, instanciación con `new`,
-y los operadores de tipos `is` y `as`.
+los operadores de tipos `is` y `as`, y los vectores de A.12 (literal `Vector`,
+comprensión `VectorComp` e indexación `Index`).
 
 Cada expresión se envuelve en una estructura `Expr` que combina su `ExprKind` con
 un `Span`. El `Span` almacena *offsets* de byte (`lo: u32`, `hi: u32`) en lugar de
@@ -182,6 +183,17 @@ con parámetros, métodos con despacho virtual, acceso y asignación de atributo
 `self`, y despacho al padre con `base(...)`), y funciones *builtin* matemáticas
 (`sqrt`, `sin`, `cos`, `exp`, `log`, `rand`) junto con `print` y el iterable
 `range`.
+
+Más allá del mínimo exigido (A.1–A.8), la VM implementa también los **vectores**
+de HULK (A.12): literales explícitos `[1, 2, 3]`, indexación `v[i]`, el método
+`size()` y la sintaxis de comprensión por patrón generador
+`[expr | x in iterable]`. Un vector se representa en *runtime* como un objeto del
+*heap* respaldado por una lista nativa de valores; implementa el protocolo
+iterable (`next()`/`current()`), de modo que `for (x in v)` y el paso de un vector
+donde se espera un iterable `T*` funcionan sin código especial, y participa en la
+recolección de basura como cualquier otro objeto. El tipo `T[]` permite, además,
+exigir estáticamente un vector (con `size()` e indexación) frente al iterable
+genérico `T*`.
 
 La gestión de memoria se realiza mediante un **recolector de basura
 *mark-and-sweep*** con un umbral configurable de asignaciones (ajustable vía la

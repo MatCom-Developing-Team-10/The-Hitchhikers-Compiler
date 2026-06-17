@@ -200,3 +200,66 @@ Ver [crates/hulk-vm/vm-v4.spec.md](../crates/hulk-vm/vm-v4.spec.md).
 - **Lua**: incremental mark-and-sweep. HULK usa la version stop-the-world por simplicidad.
 - **Java/Go**: generacional con colectores concurrentes. Fuera del scope de un compilador educativo.
 - **Rust**: no tiene GC — ownership estatica. HULK necesita GC porque permite mutacion compartida via objetos.
+
+---
+
+## 4. Vectores (A.12) — feature de la spec mas alla del minimo
+
+> **Nota de alcance:** los vectores **no son una extension original**: forman parte de *HULK — The Book* (A.12). Se documentan aqui porque quedan **fuera del minimo exigido** por la orientacion (A.1–A.8, hasta verificacion de tipos) y porque su implementacion atraviesa todo el pipeline igual que las extensiones. Hacen pasar la categoria `generators` de la suite oficial de la catedra.
+
+**Sintaxis:** literal explicito `[e0, e1, ...]`, indexacion `v[i]`, metodo `size()`, comprension por patron generador `[expr | x in iterable]` (un solo `|`, conforme al libro) y notacion de tipo `T[]`.
+
+### Sintaxis
+
+```hulk
+// Explicito
+let v = [1, 2, 3, 4, 5] in print(v[3]);     // indexacion 0-based
+
+// size() y protocolo iterable
+let v = [10, 20, 30] in {
+    print(v.size());                         // 3
+    for (x in v) print(x);                    // 10, 20, 30
+};
+
+// Comprension (generador): [<expr> | <symbol> in <iterable>]
+let squares = [x * x | x in range(1, 6)] in
+for (y in squares) print(y);                 // 1, 4, 9, 16, 25
+
+// Tipado: T* (iterable) vs T[] (vector con size()/indexacion)
+function sum(xs: Number*): Number =>          // acepta cualquier iterable
+    let t = 0 in { for (x in xs) t := t + x; t };
+function mean(xs: Number[]): Number =>        // exige vector concreto
+    sum(xs) / xs.size();
+```
+
+### Reglas semanticas
+
+| Regla | Comportamiento |
+|-------|----------------|
+| **Tipo del literal** | `[e0, ..., en]` tiene tipo `T[]` donde `T` es el ancestro comun (LCA) de los tipos de los elementos; `[]` vacio es `Object[]`. |
+| **Tipo de la comprension** | `[expr | x in it]` evalua `expr` con `x` ligado al tipo de elemento de `it`; el resultado es `E[]` con `E` el tipo de `expr`. |
+| **Indexacion** | `v[i]` requiere `v : T[]` e `i : Number`; produce `T`. Indexar un no-vector → error `NotIndexable`. |
+| **`size()`** | Disponible solo sobre `T[]`, no sobre el iterable generico `T*`. |
+| **Conformidad `T[] <= T*`** | Un vector conforma al iterable tipado: se puede pasar `Number[]` donde se espera `Number*`. La inversa no se cumple. |
+| **Invariancia** | Como los genericos, `T[]` es invariante: `Number[]` no conforma a `Object[]`. |
+| **Iterable** | `T[]` implementa el protocolo iterable; `for (x in v)` liga `x : T`. |
+
+### Cambios en la implementacion
+
+| Capa | Cambio |
+|------|--------|
+| AST | `TypeRef::Vector(Box<TypeRef>)` (`T[]`); `ExprKind::Vector(Vec<Expr>)`, `ExprKind::VectorComp(Box<Expr>, String, Box<Expr>)`, `ExprKind::Index(Box<Expr>, Box<Expr>)` |
+| Parser | Literal y comprension dentro de `[]` (cabeza restringida para desambiguar el `|` del `OR` logico), indexacion postfija `expr[expr]`, y postfijo de tipo `T[]` |
+| Semantic | `Type::Vector(Box<Type>)`; conformidad `T[] <= T*`; tipo de elemento para `for`/comprension; `size()`; nuevo `SemError::NotIndexable` |
+| IR / VM | Instrucciones `MakeVector(n)`, `Index`, `VecPush`; el vector es un objeto del *heap* con lista nativa y cursor que implementa `next`/`current`/`size`; participa en el GC mark-and-sweep |
+
+### Ejemplo end-to-end
+
+Ver [tests/hulk_std/a12_vectors.hulk](../tests/hulk_std/a12_vectors.hulk), [a12_comprehension.hulk](../tests/hulk_std/a12_comprehension.hulk) y [a12_typed.hulk](../tests/hulk_std/a12_typed.hulk).
+
+### Comparativa con otros lenguajes
+
+- **Python**: list comprehensions `[x*x for x in range]`. HULK usa la forma del libro con `|` en vez de `for`, mas cercana a la notacion de conjuntos.
+- **Haskell**: list comprehensions `[x*x | x <- xs]` — practicamente identicas a HULK (de ahi la barra `|`).
+- **Java/C#**: vectores/arrays con indexacion `[]`; las comprensiones se expresan via *streams*/LINQ. HULK las integra en la sintaxis del lenguaje.
+- **Rust**: `Vec<T>` con tipado invariante (como `T[]` aqui); las comprensiones no son sintaxis nativa (se usan iteradores).
