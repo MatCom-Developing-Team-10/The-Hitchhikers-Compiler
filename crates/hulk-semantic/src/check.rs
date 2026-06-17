@@ -68,6 +68,15 @@ pub struct Checker {
     /// Generic type parameters in scope for the current declaration body
     /// (e.g., `T` inside `function map[T,U](...)` or inside methods of `List[T]`).
     current_generic_scope: Vec<String>,
+    /// Side-channel for constructor-parameter inference (A.9.3). When `Some`,
+    /// every `new T(args)` evaluated by `check_expr` folds its argument types
+    /// (by position) into the running LCA for the type that *declares* `T`'s
+    /// effective ctor params, so an un-annotated ctor param can be inferred
+    /// from its call sites. Keyed by declaring-type name; each `Vec<Type>` has
+    /// one running LCA slot per ctor param (`Type::Error` = neutral element).
+    /// `None` during normal checking, so the hook is inert outside
+    /// `infer_ctor_params`.
+    ctor_arg_obs: Option<HashMap<String, Vec<Type>>>,
 }
 
 impl Default for Checker {
@@ -83,6 +92,7 @@ impl Checker {
             errors: Vec::new(),
             current_method: None,
             current_generic_scope: Vec::new(),
+            ctor_arg_obs: None,
         }
     }
 
@@ -811,6 +821,258 @@ impl Checker {
             return self.effective_ctor_params(&info.parent);
         }
         Vec::new()
+    }
+
+    /// Name of the type that actually *declares* the constructor parameters used
+    /// when instantiating `tname` — i.e. `tname` itself, or, for a child that
+    /// implicitly forwards (no own params and no explicit `inherits P(args)`),
+    /// the nearest ancestor that declares them. Mirrors `effective_ctor_params`'
+    /// forwarding rule so a `new Child(...)` can constrain the parent's params.
+    fn effective_ctor_owner(&self, tname: &str) -> Option<String> {
+        let info = self.ctx.types.get(tname)?;
+        if !info.ctor_params.is_empty() {
+            return Some(tname.to_string());
+        }
+        if info.parent_args.is_none() && info.parent != "Object" {
+            return self.effective_ctor_owner(&info.parent);
+        }
+        None
+    }
+
+    // ---------------------------------------- pass 2.0: ctor-parameter inference
+    //
+    // Implements A.9.3 for *type* (constructor) parameters: an un-annotated ctor
+    // param is inferred from the argument types passed at its `new T(...)` call
+    // sites. The inferred type is the LCA (lowest common ancestor) of every
+    // observed argument — the most specific type that can hold all of them. With
+    // it, the book's canonical un-annotated `type Point(x, y) { x = x; ... }`
+    // (instantiated as `new Point(3, 4)`) infers `x, y : Number`, so the derived
+    // attributes and methods (`getX() => self.x`) are `Number` instead of
+    // `Object`, and later arithmetic/`@` on them type-checks.
+    //
+    // Safe and monotonic, like `infer_params`: a ctor param is only narrowed when
+    // it is currently the permissive `Object` default (un-annotated) and every
+    // call site agrees on a more specific common type. Annotated params and any
+    // type whose call sites disagree (LCA stays `Object`) are left untouched, so
+    // a program that type-checked before still does.
+    pub fn infer_ctor_params(&mut self, prog: &Program) {
+        let total_unannotated: usize = prog
+            .types
+            .iter()
+            .flat_map(|t| &t.type_params)
+            .filter(|p| p.ty.is_none())
+            .count();
+        if total_unannotated == 0 {
+            return;
+        }
+        let max_iters = total_unannotated + 2;
+
+        for _ in 0..max_iters {
+            // Phase 1: observe the argument types at every `new` site program-wide.
+            self.ctor_arg_obs = Some(HashMap::new());
+            self.observe_new_sites(prog);
+            let obs = self.ctor_arg_obs.take().unwrap_or_default();
+
+            // Phase 2: narrow un-annotated ctor params toward the observed LCA, and
+            // re-derive the attributes of any type whose params changed.
+            let mut changed = false;
+            for td in &prog.types {
+                let Some(joined) = obs.get(&td.name) else {
+                    continue;
+                };
+                let old = self
+                    .ctx
+                    .types
+                    .get(&td.name)
+                    .map(|i| i.ctor_params.clone())
+                    .unwrap_or_default();
+                let mut new_params = old.clone();
+                for (i, p) in td.type_params.iter().enumerate() {
+                    if p.ty.is_some() || i >= new_params.len() {
+                        continue; // annotated params are never inferred over
+                    }
+                    if !matches!(new_params[i].1, Type::Object) {
+                        continue; // only ever narrow from the `Object` default
+                    }
+                    if let Some(j) = joined.get(i) {
+                        if !matches!(j, Type::Error | Type::Object) {
+                            new_params[i].1 = j.clone();
+                        }
+                    }
+                }
+                if new_params != old {
+                    if let Some(info) = self.ctx.types.get_mut(&td.name) {
+                        info.ctor_params = new_params;
+                    }
+                    let attrs = self.infer_attr_types(td);
+                    if let Some(info) = self.ctx.types.get_mut(&td.name) {
+                        info.attrs = attrs;
+                    }
+                    changed = true;
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+        self.ctor_arg_obs = None;
+    }
+
+    /// Walk every function/method/attribute body and the program entry with the
+    /// right environments so that `check_expr`'s `New` arm fires the ctor-arg
+    /// observation hook. Errors raised during this dry run are discarded; the
+    /// real diagnostics come from `check_bodies`.
+    fn observe_new_sites(&mut self, prog: &Program) {
+        let saved_errors = self.errors.len();
+
+        for f in &prog.functions {
+            let Some(sig) = self.ctx.funcs.get(&f.name).cloned() else {
+                continue;
+            };
+            let saved_scope =
+                std::mem::replace(&mut self.current_generic_scope, f.generic_params.clone());
+            let mut env = Env::new();
+            for (p, pt) in f.params.iter().zip(sig.params.iter()) {
+                env.define(
+                    &p.name,
+                    Binding {
+                        ty: pt.clone(),
+                        span: p.span,
+                    },
+                );
+            }
+            let _ = self.check_expr(&mut env, &f.body);
+            self.current_generic_scope = saved_scope;
+        }
+
+        for td in &prog.types {
+            let self_ty = if td.generic_params.is_empty() {
+                Type::User(td.name.clone())
+            } else {
+                Type::Generic(
+                    td.name.clone(),
+                    td.generic_params
+                        .iter()
+                        .map(|p| Type::Param(p.clone()))
+                        .collect(),
+                )
+            };
+            let scope = td.generic_params.clone();
+            let ctor_params: Vec<(String, Type)> = self
+                .ctx
+                .types
+                .get(&td.name)
+                .map(|i| i.ctor_params.clone())
+                .unwrap_or_default();
+
+            // Attribute initializers: ctor params are in scope, `self` is not.
+            for a in &td.attributes {
+                let saved_scope = std::mem::replace(&mut self.current_generic_scope, scope.clone());
+                let mut env = Env::new();
+                for (pname, pty) in &ctor_params {
+                    env.define(
+                        pname,
+                        Binding {
+                            ty: pty.clone(),
+                            span: a.span,
+                        },
+                    );
+                }
+                let _ = self.check_expr(&mut env, &a.init);
+                self.current_generic_scope = saved_scope;
+            }
+
+            // Method bodies: `self` plus the method's params are in scope.
+            for m in &td.methods {
+                let Some(sig) = self
+                    .ctx
+                    .types
+                    .get(&td.name)
+                    .and_then(|i| i.methods.get(&m.name))
+                    .cloned()
+                else {
+                    continue;
+                };
+                let saved_scope = std::mem::replace(&mut self.current_generic_scope, scope.clone());
+                let saved_method = self.current_method.take();
+                let mut env = Env::new();
+                env.define(
+                    "self",
+                    Binding {
+                        ty: self_ty.clone(),
+                        span: m.span,
+                    },
+                );
+                for (p, pt) in m.params.iter().zip(sig.params.iter()) {
+                    env.define(
+                        &p.name,
+                        Binding {
+                            ty: pt.clone(),
+                            span: p.span,
+                        },
+                    );
+                }
+                self.current_method = Some(MethodScope {
+                    owner: td.name.clone(),
+                    name: m.name.clone(),
+                });
+                let _ = self.check_expr(&mut env, &m.body);
+                self.current_method = saved_method;
+                self.current_generic_scope = saved_scope;
+            }
+        }
+
+        // Program entry expression.
+        let mut env = Env::new();
+        let _ = self.check_expr(&mut env, &prog.entry);
+
+        self.errors.truncate(saved_errors);
+    }
+
+    /// (Re)infer the type of every attribute of `td` given the type's *current*
+    /// ctor-param types in `self.ctx`. Annotated attributes resolve from their
+    /// annotation; un-annotated ones are inferred from their initializer in a
+    /// scope where the ctor params are bound. Errors are suppressed here and
+    /// re-reported by `check_bodies`. Mirrors the attribute logic in `sign` so
+    /// the two stay consistent.
+    fn infer_attr_types(&mut self, td: &TypeDecl) -> HashMap<String, Type> {
+        let scope = td.generic_params.clone();
+        let ctor_params: Vec<(String, Type)> = self
+            .ctx
+            .types
+            .get(&td.name)
+            .map(|i| i.ctor_params.clone())
+            .unwrap_or_default();
+        let mut attrs = HashMap::new();
+        for a in &td.attributes {
+            let attr_type = if a.ty.is_some() {
+                self.resolve_or_default(a.ty.as_ref(), &scope, a.span)
+            } else {
+                let saved_errors = self.errors.len();
+                let saved_scope = std::mem::replace(&mut self.current_generic_scope, scope.clone());
+                let mut env = Env::new();
+                for (pname, pty) in &ctor_params {
+                    env.define(
+                        pname,
+                        Binding {
+                            ty: pty.clone(),
+                            span: a.span,
+                        },
+                    );
+                }
+                let inferred = self.check_expr(&mut env, &a.init);
+                self.errors.truncate(saved_errors);
+                self.current_generic_scope = saved_scope;
+                if inferred == Type::Error {
+                    Type::Object
+                } else {
+                    inferred
+                }
+            };
+            attrs.insert(a.name.clone(), attr_type);
+        }
+        attrs
     }
 
     // ------------------------------------------ pass 2.1: parameter inference
@@ -1650,6 +1912,33 @@ impl Checker {
                     .iter()
                     .map(|t| self.ctx.substitute(t, &subst))
                     .collect();
+                // Ctor-param inference side-channel (A.9.3): record, per declaring
+                // type, the LCA of the argument types seen at every `new` site, so
+                // an un-annotated ctor param can be inferred from its callers.
+                // Only active during `infer_ctor_params` (otherwise `None`).
+                if self.ctor_arg_obs.is_some() {
+                    if let Some(owner) = self.effective_ctor_owner(tname) {
+                        let arity = self
+                            .ctx
+                            .types
+                            .get(&owner)
+                            .map(|i| i.ctor_params.len())
+                            .unwrap_or(0);
+                        if arity > 0 {
+                            let mut slots = self
+                                .ctor_arg_obs
+                                .as_ref()
+                                .and_then(|m| m.get(&owner).cloned())
+                                .unwrap_or_else(|| vec![Type::Error; arity]);
+                            for (slot, aty) in slots.iter_mut().zip(arg_tys.iter()) {
+                                *slot = self.ctx.lca(slot, aty);
+                            }
+                            if let Some(obs) = self.ctor_arg_obs.as_mut() {
+                                obs.insert(owner, slots);
+                            }
+                        }
+                    }
+                }
                 self.check_args(&expected, &arg_tys, args, e.span);
                 if info.generic_params.is_empty() {
                     Type::User(tname.clone())
@@ -1795,6 +2084,7 @@ pub fn analyze(prog: &Program) -> Result<TypeCtx, Vec<SemError>> {
     let mut c = Checker::new();
     c.collect(prog);
     c.sign(prog);
+    c.infer_ctor_params(prog);
     c.infer_params(prog);
     c.infer_returns(prog);
     c.check_interfaces(prog);

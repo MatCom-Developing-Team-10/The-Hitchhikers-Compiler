@@ -1,0 +1,16 @@
+// A.7.2 — canonical Point with UN-annotated constructor params (book syntax).
+// `x`/`y` are inferred to Number from the `new Point(3, 4)` call site, so the
+// derived attributes and `getX()`/`getY()` become Number and the `@`/arithmetic
+// below type-check. Before ctor-param inference this program was rejected with a
+// spurious `expected String or Number, found Object`.
+type Point(x, y) {
+    x = x;
+    y = y;
+    getX() => self.x;
+    getY() => self.y;
+}
+let p = new Point(3, 4) in {
+    print("x: " @ p.getX());
+    print("y: " @ p.getY());
+    print(p.getX() + p.getY());
+}

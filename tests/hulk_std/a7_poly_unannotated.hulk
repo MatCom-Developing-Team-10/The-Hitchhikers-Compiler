@@ -1,0 +1,13 @@
+// A.7.4 — polymorphism with base() and UN-annotated constructor params.
+// `firstname`/`lastname` are inferred to String from `new Knight("Phil","Collins")`
+// (forwarded to Person's ctor params), so the `@@` concatenations in `name()`
+// type-check without any annotations. This is the book's A.7.4 example verbatim.
+type Person(firstname, lastname) {
+    firstname = firstname;
+    lastname = lastname;
+    name() => self.firstname @@ self.lastname;
+}
+type Knight inherits Person {
+    name() => "Sir" @@ base();
+}
+let p = new Knight("Phil", "Collins") in print(p.name());
