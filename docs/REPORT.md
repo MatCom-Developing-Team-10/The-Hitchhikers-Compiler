@@ -2,6 +2,7 @@
 
 **Lenguaje implementado:** HULK (Havana University Language for Kompilers)
 **Lenguaje de implementación:** Rust (edition 2024, MSRV 1.85)
+**Curso:** Compilación — Facultad de Matemática y Computación, Universidad de La Habana
 
 ---
 
