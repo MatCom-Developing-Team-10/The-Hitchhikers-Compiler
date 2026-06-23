@@ -8,13 +8,13 @@
 \babel@aux{spanish}{}
 \@writefile{toc}{\contentsline {title}{The Hitchhiker's Compiler: un compilador de HULK en Rust con genericidad, interfaces y recolecci\'on de basura}{1}{}\protected@file@percent }
 \@writefile{toc}{\authcount {3}}
-\@writefile{toc}{\contentsline {author}{Kevin Alejandro Torres Perera \and Lianny de la Caridad Rev\'ee Valdivieso \and Jocdan Lismar L\'opez Mantec\'on}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {author}{Kevin Alejandro Torres Perera \and Lianny de la Caridad Rev\'e Valdivieso \and Jocdan Lismar L\'opez Mantec\'on}{1}{}\protected@file@percent }
 \citation{aho2006compilers}
 \citation{hulkbook}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introducci\'on}{2}{}\protected@file@percent }
 \newlabel{sec:intro}{{1}{2}{}{}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {1.1}El lenguaje HULK}{2}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Tesis y contribuciones}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Objetivo y alcance}{2}{}\protected@file@percent }
 \citation{aho2006compilers}
 \citation{logos}
 \citation{knuth1965translation}
@@ -28,21 +28,21 @@
 \citation{pierce2002types}
 \citation{liskov1994subtyping}
 \citation{cardelli1985understanding}
+\newlabel{alg:lca}{{1}{4}{}{}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces C\'alculo del ancestro com\'un m\'as bajo (\emph  {join} en el ret\'iculo de herencia).}}{4}{}\protected@file@percent }
+\newlabel{fig:lca}{{1}{4}{}{}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.4}El \'arbol de sintaxis abstracta}{4}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Sistemas de tipos, conformidad y subtipado}{4}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {2.6}Polimorfismo}{4}{}\protected@file@percent }
 \citation{bracha1998gj}
 \citation{klabnik2023rust}
 \citation{appel1998modern}
 \citation{nystrom2021crafting}
-\newlabel{alg:lca}{{1}{5}{}{}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces C\'alculo del ancestro com\'un m\'as bajo (\emph  {join} en el ret\'iculo de herencia).}}{5}{}\protected@file@percent }
-\newlabel{fig:lca}{{1}{5}{}{}{}}
+\citation{jones2011garbage}
 \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Reglas de conformidad $\leq $ del verificador de tipos (n\'ucleo A.8.4). Las reglas para genericidad (invarianza) e interfaces (nominal/estructural) aparecen en la Secci\'on~\ref {sec:extensiones}.}}{5}{}\protected@file@percent }
 \newlabel{fig:reglas}{{2}{5}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.6}Polimorfismo}{5}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.7}Subtipado nominal frente a estructural}{5}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {2.8}Representaci\'on intermedia y m\'aquinas de pila}{5}{}\protected@file@percent }
-\citation{jones2011garbage}
 \citation{bacon2001recycler}
 \citation{mccarthy1960recursive,collins1960lisp}
 \citation{jones1996garbage}
@@ -51,110 +51,152 @@
 \@writefile{toc}{\contentsline {section}{\numberline {3}Arquitectura y desarrollo}{6}{}\protected@file@percent }
 \newlabel{sec:arquitectura}{{3}{6}{}{}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Organizaci\'on del \emph  {workspace}}{6}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}An\'alisis l\'exico (\texttt  {hulk-lexer})}{6}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Responsabilidad de cada \emph  {crate} del \emph  {workspace}.}}{6}{}\protected@file@percent }
+\newlabel{tab:crates}{{1}{6}{}{}{}}
 \@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Pipeline de \emph  {The Hitchhiker's Compiler}. El AST (\texttt  {hulk-ast}) es el contrato compartido entre el frontend y las fases posteriores; las dependencias fluyen en una \'unica direcci\'on.}}{7}{}\protected@file@percent }
 \newlabel{fig:pipeline}{{3}{7}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Responsabilidad de cada \emph  {crate} del \emph  {workspace}.}}{7}{}\protected@file@percent }
-\newlabel{tab:crates}{{1}{7}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}An\'alisis l\'exico (\texttt  {hulk-lexer})}{7}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.3}An\'alisis sint\'actico (\texttt  {hulk-parser})}{7}{}\protected@file@percent }
-\newlabel{lst:desugar}{{1.1}{8}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.1}Desazucarado del \texttt  {let} con m\'ultiples enlaces a \texttt  {let} unarios anidados.}{8}{}\protected@file@percent }
+\citation{pierce2002types}
+\citation{pierce2000local}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.4}El AST (\texttt  {hulk-ast})}{8}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.5}An\'alisis sem\'antico (\texttt  {hulk-semantic})}{8}{}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Las ocho pasadas del an\'alisis sem\'antico tal como las orquesta \texttt  {analyze()}: cuatro fundamentales, tres de inferencia (A.9) y una de interfaces (extensi\'on).}}{9}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Las ocho pasadas del an\'alisis sem\'antico tal como las orquesta \texttt  {analyze()}: cuatro fundamentales, tres de inferencia y una de interfaces (extensi\'on).}}{9}{}\protected@file@percent }
 \newlabel{tab:pasadas}{{2}{9}{}{}{}}
-\newlabel{lst:semerror}{{1.2}{9}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.2}Algunas variantes de \texttt  {SemError}; cada una porta su \texttt  {Span} para diagnosticar con precisi\'on.}{9}{}\protected@file@percent }
-\newlabel{lst:type}{{1.3}{10}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.3}El \texttt  {enum Type} con las variantes de las extensiones.}{10}{}\protected@file@percent }
+\newlabel{lst:semerror}{{1.1}{10}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.1}Algunas variantes de \texttt  {SemError}; cada una porta su \texttt  {Span} para diagnosticar con precisi\'on.}{10}{}\protected@file@percent }
+\newlabel{lst:type}{{1.2}{10}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.2}El \texttt  {enum Type} con las variantes de las extensiones.}{10}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Representaci\'on intermedia y m\'aquina virtual}{10}{}\protected@file@percent }
+\citation{aho2006compilers}
 \@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Conjunto de instrucciones del IR (\texttt  {enum Instr}), agrupado por funci\'on.}}{11}{}\protected@file@percent }
 \newlabel{tab:isa}{{3}{11}{}{}{}}
-\newlabel{lst:bytecode}{{1.4}{11}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.4}Descenso a \emph  {bytecode} de la expresi\'on principal del Listado~\ref {lst:e2e}.}{11}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.7}El \emph  {driver} y el contrato de evaluaci\'on (\texttt  {hulkc})}{11}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.8}Un ejemplo de extremo a extremo}{11}{}\protected@file@percent }
-\newlabel{sec:ejemplo}{{3.8}{11}{}{}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Resumen de las extensiones y sus referentes en lenguajes hist\'oricos.}}{12}{}\protected@file@percent }
-\newlabel{tab:resumen-ext}{{4}{12}{}{}{}}
-\newlabel{lst:e2e}{{1.5}{12}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.5}Programa HULK que ejercita herencia y despacho al padre.}{12}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {4}Extensiones originales al lenguaje}{12}{}\protected@file@percent }
-\newlabel{sec:extensiones}{{4}{12}{}{}{}}
+\@writefile{toc}{\contentsline {paragraph}{Costo del despacho}{11}{}\protected@file@percent }
+\newlabel{lst:bytecode}{{1.3}{12}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.3}Descenso a \emph  {bytecode} de la expresi\'on principal del Listado~\ref {lst:e2e}.}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.7}El \emph  {driver} y el contrato de evaluaci\'on (\texttt  {hulkc})}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.8}Un ejemplo de extremo a extremo}{12}{}\protected@file@percent }
+\newlabel{sec:ejemplo}{{3.8}{12}{}{}{}}
+\newlabel{lst:e2e}{{1.4}{12}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.4}Programa HULK que ejercita herencia y despacho al padre.}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Extensiones al lenguaje}{13}{}\protected@file@percent }
+\newlabel{sec:extensiones}{{4}{13}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Resumen de las extensiones y sus referentes en lenguajes hist\'oricos.}}{13}{}\protected@file@percent }
+\newlabel{tab:resumen-ext}{{4}{13}{}{}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Genericidad: polimorfismo param\'etrico por borrado de tipos}{13}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Definici\'on y sintaxis.}{13}{}\protected@file@percent }
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.6}Tipos y funciones genericidad en HULK.}{13}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Reglas sem\'anticas.}{13}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Implementaci\'on.}{13}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Sustituci\'on en acci\'on.}{13}{}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.5}Tipos y funciones genericidad en HULK.}{13}{}\protected@file@percent }
 \citation{klabnik2023rust,bracha1998gj}
+\@writefile{toc}{\contentsline {paragraph}{Reglas sem\'anticas.}{14}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementaci\'on.}{14}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Sustituci\'on en acci\'on.}{14}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Comparativa.}{14}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Interfaces: contratos con conformidad nominal y estructural}{14}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Definici\'on y sintaxis.}{14}{}\protected@file@percent }
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.7}Interfaces, herencia m\'ultiple entre interfaces y despacho din\'amico.}{14}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Reglas sem\'anticas.}{14}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Conformidad dual.}{15}{}\protected@file@percent }
-\newlabel{lst:conforms}{{1.8}{15}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.8}Conformidad hacia una interfaz: primero la v\'ia nominal, luego la estructural.}{15}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Implementaci\'on.}{15}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Recolector de basura \emph  {mark-and-sweep}}{15}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Motivaci\'on.}{15}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Modelo de memoria.}{15}{}\protected@file@percent }
-\newlabel{lst:heap}{{1.9}{15}{}{}{}}
-\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.9}El \emph  {heap} gestionado por el GC.}{15}{}\protected@file@percent }
+\citation{liskov1994subtyping}
+\citation{pierce2002types,abadi1996objects}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Conformidad a interfaz: nominal (\texttt  {implements} transitivo) o estructural. $\mathrm  {decl}^{*}(T)$ son los m\'etodos que $T$ declara o hereda; $\mathtt  {extends}^{*}$ es la clausura transitiva de \texttt  {extends}. La igualdad $\overline  {P'}=\overline  {P}$, $R'=R$ es \textbf  {exacta} (invariante), tras sustituir los gen\'ericos de $I$.}}{15}{}\protected@file@percent }
+\newlabel{fig:iface}{{4}{15}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.6}Interfaces, herencia m\'ultiple entre interfaces y despacho din\'amico.}{15}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Reglas sem\'anticas.}{15}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Conformidad dual}{15}{}\protected@file@percent }
+\newlabel{lst:conforms}{{1.7}{16}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.7}Conformidad hacia una interfaz: primero la v\'ia nominal, luego la estructural.}{16}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Implementaci\'on.}{16}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Recolector de basura \emph  {mark-and-sweep}}{16}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Motivaci\'on.}{16}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Modelo de memoria.}{16}{}\protected@file@percent }
 \citation{bacon2001recycler}
 \citation{ierusalimschy2016lua}
 \citation{jones1996garbage}
 \citation{klabnik2023rust}
 \citation{mccarthy1960recursive}
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Traza del \emph  {heap} en \texttt  {gc.hulk} con umbral 8: al disparar la colecci\'on, solo la caja de la iteraci\'on en curso es alcanzable desde las ra\'ices; las anteriores se reciclan al \texttt  {free_list}.}}{16}{}\protected@file@percent }
-\newlabel{fig:gctrace}{{4}{16}{}{}{}}
-\@writefile{toc}{\contentsline {paragraph}{Algoritmo.}{16}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Propiedades.}{16}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Traza de ejecuci\'on.}{16}{}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Familias de recolecci\'on de basura comparadas en los ejes relevantes para un compilador educativo.}}{17}{}\protected@file@percent }
-\newlabel{tab:gc}{{5}{17}{}{}{}}
+\citation{jones2011garbage,jones1996garbage}
+\citation{jones2011garbage,jones1996garbage}
+\citation{bacon2001recycler}
+\citation{mccarthy1960recursive}
+\citation{ierusalimschy2016lua}
+\newlabel{lst:heap}{{1.8}{17}{}{}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1.8}El \emph  {heap} gestionado por el GC.}{17}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Algoritmo.}{17}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Propiedades.}{17}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Traza de ejecuci\'on.}{17}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{Comparativa.}{17}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Vectores (A.12): m\'as all\'a del m\'inimo}{17}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {5}Evaluaci\'on, pruebas y calidad}{17}{}\protected@file@percent }
-\newlabel{sec:evaluacion}{{5}{17}{}{}{}}
 \citation{aho2006compilers}
 \citation{appel1998modern}
 \citation{nystrom2021crafting}
-\citation{liskov1994subtyping}
+\citation{pierce2000local}
 \citation{cardelli1985understanding}
+\citation{abadi1996objects}
+\citation{liskov1994subtyping}
 \citation{bracha1998gj}
 \citation{mccarthy1960recursive}
-\citation{jones2011garbage,jones1996garbage}
+\citation{jones2011garbage}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Comparaci\'on \textbf  {cualitativa} (no emp\'irica: no medimos \emph  {throughput} ni pausas) de familias de GC seg\'un los ejes que motivaron la elecci\'on. Las propiedades resumen lo establecido por Jones et al.~\cite  {jones2011garbage,jones1996garbage}.}}{18}{}\protected@file@percent }
+\newlabel{tab:gc}{{5}{18}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Evaluaci\'on, pruebas y calidad}{18}{}\protected@file@percent }
+\newlabel{sec:evaluacion}{{5}{18}{}{}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {6}Trabajo relacionado}{18}{}\protected@file@percent }
 \newlabel{sec:relacionado}{{6}{18}{}{}{}}
-\citation{hitchhikersrepo}
-\bibstyle{plain}
-\bibdata{refs}
-\bibcite{aho2006compilers}{1}
+\citation{bracha1998gj,gosling2014java}
+\citation{klabnik2023rust}
+\citation{kennedy2001generics}
+\citation{pierce2002types}
 \@writefile{toc}{\contentsline {section}{\numberline {7}Conclusiones}{19}{}\protected@file@percent }
 \newlabel{sec:conclusiones}{{7}{19}{}{}{}}
 \@writefile{toc}{\contentsline {paragraph}{Ventajas.}{19}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Desventajas y cr\'iticas.}{19}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Comparativa global.}{19}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Trabajo futuro.}{19}{}\protected@file@percent }
-\bibcite{appel1998modern}{2}
-\bibcite{bacon2001recycler}{3}
-\bibcite{bracha1998gj}{4}
-\bibcite{cardelli1985understanding}{5}
-\bibcite{collins1960lisp}{6}
-\bibcite{deroon1989lalr}{7}
-\bibcite{hulkbook}{8}
-\bibcite{ierusalimschy2016lua}{9}
-\bibcite{jones2011garbage}{10}
-\bibcite{jones1996garbage}{11}
-\bibcite{klabnik2023rust}{12}
-\bibcite{knuth1965translation}{13}
-\bibcite{liskov1994subtyping}{14}
-\bibcite{lalrpop}{15}
-\bibcite{mccarthy1960recursive}{16}
-\bibcite{nystrom2021crafting}{17}
-\bibcite{pierce2002types}{18}
-\bibcite{logos}{19}
-\bibcite{hitchhikersrepo}{20}
-\gdef \@abspage@last{20}
+\@writefile{toc}{\contentsline {paragraph}{Desventajas y cr\'iticas (declaradas abiertamente).}{19}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Estudio comparativo con lenguajes de programaci\'on}{19}{}\protected@file@percent }
+\newlabel{sec:comparativa}{{7.1}{19}{}{}{}}
+\@writefile{toc}{\contentsline {paragraph}{ Polimorfismo param\'etrico (Tabla~\ref {tab:cmp-gen}).}{19}{}\protected@file@percent }
+\citation{bracha1998gj,gosling2014java,kennedy2001generics,klabnik2023rust,pierce2002types}
+\citation{bierman2014typescript}
+\citation{abadi1996objects}
+\citation{liskov1994subtyping}
+\citation{cardelli1985understanding,abadi1996objects,golang,bierman2014typescript,liskov1994subtyping}
+\citation{klabnik2023rust}
+\citation{jones2011garbage}
+\citation{bacon2001recycler}
+\citation{mccarthy1960recursive}
+\citation{ungar1984generation}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Realizaci\'on del polimorfismo param\'etrico. Fuentes: \cite  {bracha1998gj,gosling2014java,kennedy2001generics,klabnik2023rust,pierce2002types}.}}{20}{}\protected@file@percent }
+\newlabel{tab:cmp-gen}{{6}{20}{}{}{}}
+\@writefile{toc}{\contentsline {paragraph}{Subtipado e interfaces (Tabla~\ref {tab:cmp-sub}).}{20}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{ Gesti\'on de memoria (Tabla~\ref {tab:cmp-gc}).}{20}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Disciplina de conformidad a interfaces/protocolos. Fuentes: \cite  {cardelli1985understanding,abadi1996objects,golang,bierman2014typescript,liskov1994subtyping}.}}{20}{}\protected@file@percent }
+\newlabel{tab:cmp-sub}{{7}{20}{}{}{}}
+\citation{jones2011garbage,mccarthy1960recursive,bacon2001recycler,ungar1984generation,klabnik2023rust,ierusalimschy2016lua}
+\citation{hitchhikersrepo}
+\bibstyle{plain}
+\bibdata{refs}
+\bibcite{abadi1996objects}{1}
+\bibcite{aho2006compilers}{2}
+\bibcite{appel1998modern}{3}
+\bibcite{bacon2001recycler}{4}
+\bibcite{bierman2014typescript}{5}
+\bibcite{bracha1998gj}{6}
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces Estrategias de gesti\'on de memoria. Fuentes: \cite  {jones2011garbage,mccarthy1960recursive,bacon2001recycler,ungar1984generation,klabnik2023rust,ierusalimschy2016lua}.}}{21}{}\protected@file@percent }
+\newlabel{tab:cmp-gc}{{8}{21}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Trabajo futuro}{21}{}\protected@file@percent }
+\bibcite{cardelli1985understanding}{7}
+\bibcite{collins1960lisp}{8}
+\bibcite{deroon1989lalr}{9}
+\bibcite{golang}{10}
+\bibcite{hulkbook}{11}
+\bibcite{gosling2014java}{12}
+\bibcite{ierusalimschy2016lua}{13}
+\bibcite{jones2011garbage}{14}
+\bibcite{jones1996garbage}{15}
+\bibcite{kennedy2001generics}{16}
+\bibcite{klabnik2023rust}{17}
+\bibcite{knuth1965translation}{18}
+\bibcite{liskov1994subtyping}{19}
+\bibcite{lalrpop}{20}
+\bibcite{mccarthy1960recursive}{21}
+\bibcite{nystrom2021crafting}{22}
+\bibcite{pierce2002types}{23}
+\bibcite{pierce2000local}{24}
+\bibcite{logos}{25}
+\bibcite{hitchhikersrepo}{26}
+\bibcite{ungar1984generation}{27}
+\gdef \@abspage@last{23}

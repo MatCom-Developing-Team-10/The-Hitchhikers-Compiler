@@ -1,10 +1,4 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%  The Hitchhiker's Compiler (HULK) -- Informe tecnico / paper LNCS
-%  Compilar:  pdflatex paper -> bibtex paper -> pdflatex x2
-%  Requiere:  llncs.cls (incluido en este directorio), listings, xcolor
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \documentclass[14pts,runningheads,a4paper]{llncs}
-
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage[spanish,es-noindentfirst]{babel}
@@ -74,19 +68,14 @@
 \titlerunning{The Hitchhiker's Compiler: HULK en Rust}
 
 \author{Kevin Alejandro Torres Perera \and
-        Lianny de la Caridad Rev\'ee Valdivieso \and
+        Lianny de la Caridad Rev\'e Valdivieso \and
         Jocdan Lismar L\'opez Mantec\'on}
-\authorrunning{Torres Perera, Revee Valdivieso, L\'opez Mantec\'on}
+\authorrunning{Torres Perera, Rev\'e Valdivieso, L\'opez Mantec\'on}
 
 \institute{Grupos 311 y 312, Ciencias de la Computaci\'on,\\
 Facultad de Matem\'atica y Computaci\'on,\\
 Universidad de La Habana\\
 \url{https://github.com/MatCom-Developing-Team-10/The-Hitchhikers-Compiler}\\[6pt]
-% --------------------------------------------------------------
-% LOGO DE LA UNIVERSIDAD: coloque el archivo de imagen en este mismo
-% directorio. Se incluye solo si el archivo existe (evita errores de
-% compilacion si falta). Cambie el nombre/extension si usa otro logo.
-% --------------------------------------------------------------
 \IfFileExists{matcom_logo.jpg}{\protect\includegraphics[height=1.2cm]{matcom_logo}}{}}
 
 \maketitle
@@ -95,30 +84,26 @@ Universidad de La Habana\\
 Este trabajo presenta \emph{The Hitchhiker's Compiler}, un compilador completo
 para el lenguaje HULK (\emph{Havana University Language for Kompilers})
 implementado en Rust como proyecto integrador de las asignaturas Compilaci\'on y
-Lenguajes de Programaci\'on. El compilador cubre el pipeline cl\'asico ---an\'alisis
+Lenguajes de Programaci\'on. El compilador cubre el pipeline cl\'asico: an\'alisis
 l\'exico, sint\'actico LALR(1), an\'alisis sem\'antico con verificaci\'on de tipos,
 descenso a una representaci\'on intermedia y ejecuci\'on sobre una m\'aquina virtual
-de pila--- organizado como un \emph{workspace} de siete \emph{crates} con
+de pila, organizado como un \emph{workspace} de siete \emph{crates} con
 dependencias unidireccionales que materializan los principios SOLID y DRY. El
 an\'alisis sem\'antico se estructura en una secuencia de pasadas ---cuatro
-fundamentales m\'as inferencia de tipos (A.9) y verificaci\'on de interfaces--- para
+fundamentales m\'as inferencia de tipos y verificaci\'on de interfaces--- para
 satisfacer la visibilidad global de declaraciones que exige HULK, acumula
 diagn\'osticos en lugar
 de abortar y emplea un patr\'on \emph{poison} (\code{Type::Error}) para suprimir
-cascadas de errores. Sobre esta base, el equipo dise\~n\'o y verific\'o tres
-extensiones originales al lenguaje, fundamentadas en un estudio comparativo con
-lenguajes de programaci\'on hist\'oricos: (i) \textbf{genericidad} con par\'ametros de
-tipo \code{[T]} resueltos por \emph{type erasure} e invarianza, en la l\'inea de
-Java y Scala; (ii) \textbf{interfaces} con cl\'ausulas \code{implements}/\code{extends}
-que admiten conformidad tanto nominal como estructural, combinando los modelos de
-Java y Go; y (iii) un \textbf{recolector de basura} \emph{mark-and-sweep} con
-\emph{heap} indexado por \emph{handles} que reclama ciclos, inspirado en la
-tradici\'on iniciada por Lisp. Se describen la arquitectura, las decisiones de
-dise\~no, las reglas sem\'anticas de cada extensi\'on y su implementaci\'on real,
-acompa\~nadas de una evaluaci\'on mediante una bater\'ia de pruebas unitarias, de
-integraci\'on y \emph{end-to-end}, junto con un an\'alisis cr\'itico de ventajas,
-limitaciones y mejoras futuras. El resultado es un compilador correcto, evaluable
-de forma autom\'atica y extensible sin modificar la l\'ogica existente.
+cascadas de errores. Sobre esta base, el equipo dise\~n\'o, implement\'o y valid\'o tres extensiones al lenguaje,
+fundamentadas en una comparaci\'on con lenguajes de programaci\'on conocidos:
+(i) \textbf{genericidad} con par\'ametros de tipo \code{[T]} resueltos por
+\emph{type erasure} e invarianza, como en Java y Scala; (ii) \textbf{interfaces} con
+cl\'ausulas \code{implements}/\code{extends} y conformidad tanto nominal como
+estructural, combinando los modelos de Java y Go; y (iii) un
+\textbf{recolector de basura} \emph{mark-and-sweep} con \emph{heap} indexado por
+\emph{handles} que reclama ciclos. Para cada extensi\'on se dan reglas de tipado
+formales, su realizaci\'on en el c\'odigo y una comparaci\'on cualitativa con lenguajes
+de referencia. 
 
 \keywords{compiladores, HULK, Rust, sistemas de tipos, polimorfismo param\'etrico,
 interfaces, recolecci\'on de basura, m\'aquina virtual}
@@ -162,17 +147,14 @@ booleanos con cortocircuito, de comparaci\'on y de concatenaci\'on (\code{@},
 ciclos \code{while} y \code{for}; funciones de primer orden y recursi\'on;
 declaraci\'on de tipos con constructores parametrizados, atributos, m\'etodos con
 despacho virtual, herencia (\code{inherits}) y despacho al padre (\code{base});
-y los operadores de tipo \code{is} y \code{as}. La especificaci\'on m\'inima exigida
-abarca las secciones A.1--A.8 del libro del curso, hasta la verificaci\'on de tipos.
+y los operadores de tipo \code{is} y \code{as}. 
 
-\subsection{Tesis y contribuciones}
-
-La tesis de este trabajo es que un compilador educativo, dise\~nado con una
-arquitectura modular y un sistema de tipos s\'olido, constituye una base natural y
-econ\'omica para incorporar caracter\'isticas avanzadas de lenguajes de programaci\'on
-sin reescribir la l\'ogica existente. Para demostrarlo, el equipo extendi\'o HULK con
-tres caracter\'isticas, cada una elegida por su relevancia te\'orica y su lugar en la
-historia de los lenguajes:
+\subsection{Objetivo y alcance}
+ Los objetivos son:
+(a) construir un compilador correcto y comprobable para HULK que cubra las especificaciones exigidasexigido, y (b) dise\~nar extensiones del lenguaje con reglas de tipado precisas,
+implementarlas sobre la arquitectura existente y compararlas con las decisiones de
+lenguajes conocidos. 
+Las tres extensiones son:
 
 \begin{enumerate}
   \item \textbf{Genericidad} (polimorfismo param\'etrico): par\'ametros de tipo con
@@ -208,13 +190,13 @@ secuencia de fases que transforman progresivamente la representaci\'on del progr
 El \emph{an\'alisis l\'exico} agrupa los caracteres en \emph{tokens}; el \emph{an\'alisis
 sint\'actico} reconoce la estructura gramatical y construye un \'arbol de sintaxis
 abstracta (AST); el \emph{an\'alisis sem\'antico} verifica reglas que la gram\'atica no
-captura ---sobre todo el sistema de tipos y la resoluci\'on de nombres---; y la
+captura --sobre todo el sistema de tipos y la resoluci\'on de nombres--; y la
 \emph{s\'intesis} genera c\'odigo intermedio y final. La Figura~\ref{fig:pipeline}
 muestra la instancia concreta de este esquema en nuestro proyecto.
 
 \subsection{An\'alisis l\'exico y aut\'omatas finitos}
 
-El analizador l\'exico se especifica naturalmente con expresiones regulares, cuyo
+El analizador l\'exico se especifica con expresiones regulares, cuyo
 reconocimiento equivale a un aut\'omata finito determinista (AFD). Generadores
 modernos como \emph{logos}~\cite{logos} traducen anotaciones declarativas sobre un
 tipo enumerado a un AFD eficiente en tiempo de compilaci\'on, evitando el costo de
@@ -276,7 +258,7 @@ ac\'iclica, el procedimiento siempre termina y, en el peor caso, en \code{Object
 (Algoritmo~\ref{alg:lca}). Esta operaci\'on es la que fija el tipo de un \code{if} con
 ramas heterog\'eneas y el tipo de elemento de un literal de vector.
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \fbox{\parbox{0.92\textwidth}{\small
 \textbf{Algoritmo \refstepcounter{equation}\theequation\label{alg:lca}: LCA$(A, B)$}\\[2pt]
@@ -290,7 +272,7 @@ herencia).}
 \label{fig:lca}
 \end{figure}
 
-\begin{figure}[t]
+\begin{figure}[tbp]
 \centering
 \fbox{\parbox{0.92\textwidth}{\small\centering
 \[
@@ -375,8 +357,7 @@ inalcanzable~\cite{jones2011garbage}. Existen dos grandes familias:
 \noindent
 Refinamientos posteriores ---copia semiespacial, recolecci\'on
 generacional~\cite{jones1996garbage} y colectores concurrentes como los de Go y la
-JVM--- mejoran la latencia y el rendimiento, pero exceden el alcance de un
-compilador educativo. Lenguajes como Rust prescinden de GC mediante un sistema de
+JVM--- pueden mejorar la latencia y el rendimiento. Lenguajes como Rust prescinden de GC mediante un sistema de
 \emph{ownership} verificado est\'aticamente~\cite{klabnik2023rust}; HULK, al permitir
 mutaci\'on compartida a trav\'es de objetos, s\'i requiere gesti\'on autom\'atica.
 
@@ -392,7 +373,7 @@ de las dependencias es estrictamente unidireccional: ninguna fase posterior pued
 contaminar a una anterior, lo que encarna el principio de inversi\'on de
 dependencias y permite razonar sobre cada fase de forma aislada.
 
-\begin{figure}[t]
+\begin{figure}[h]
 \centering
 \begin{lstlisting}[basicstyle=\ttfamily\scriptsize,frame=none,backgroundcolor=\color{white},numbers=none]
   fuente .hulk
@@ -420,7 +401,7 @@ fluyen en una \'unica direcci\'on.}
 \label{fig:pipeline}
 \end{figure}
 
-\begin{table}[t]
+\begin{table}[h!]
 \centering
 \caption{Responsabilidad de cada \emph{crate} del \emph{workspace}.}
 \label{tab:crates}
@@ -460,10 +441,10 @@ delimitadores (entre ellos \code{[} y \code{]} a\~nadidos para genericidad y vec
 literales e identificadores. Una decisi\'on relevante es tratar \code{self} y
 \code{base} como identificadores ordinarios, dejando su sem\'antica especial a fases
 posteriores. El lexer descarta espacios y comentarios de l\'inea (\code{//}); no
-soporta comentarios de bloque. Expone un \code{Lexer<'input>} que adapta el iterador
+soporta comentarios de bloque. Expone un \code{Lexer<input>} que adapta el iterador
 de logos al protocolo \emph{triple} \code{(inicio, Token, fin)} que LALRpop exige, y
 representa los errores con \code{LexError}, que guarda los \emph{offsets} de byte del
-fragmento ofensivo.
+fragmento errado.
 
 \subsection{An\'alisis sint\'actico (\code{hulk-parser})}
 
@@ -481,18 +462,11 @@ eliminando toda l\'ogica de enlace paralelo del verificador. Y el \code{if} llev
 siempre una rama \code{else} obligatoria: como en HULK el \code{if} es una expresi\'on
 que debe producir un valor en toda rama, una rama faltante har\'ia su tipo
 indefinible. Cada nodo carga un \code{Span} (par de \emph{offsets} \code{lo}/\code{hi})
-capturado con los marcadores \code{@L}/\code{@R} de LALRpop. El
-Listado~\ref{lst:desugar} muestra el desazucarado del \code{let} m\'ultiple: una
-construcci\'on superficial con varios enlaces se traduce a una cadena de \code{let}
-unarios cuyo alcance anidado reproduce exactamente la sem\'antica secuencial de A.4.1,
-de modo que un enlace posterior puede referirse a uno anterior.
-
-\begin{lstlisting}[language=HULK,caption={Desazucarado del \code{let} con m\'ultiples enlaces a \code{let} unarios anidados.},label={lst:desugar}]
-// superficie (lo que escribe el programador)
-let a = 1, b = a + 1, c = b * 2 in c
-// AST tras el desazucarado (semantica equivalente)
-let a = 1 in (let b = a + 1 in (let c = b * 2 in c))
-\end{lstlisting}
+capturado con los marcadores \code{@L}/\code{@R} de LALRpop. El \code{let} m\'ultiple
+se desazucara en el parser: \code{let a = 1, b = a + 1 in c} se traduce a
+\code{let a = 1 in (let b = a + 1 in c)}, una cadena de \code{let} unarios cuyo
+alcance anidado reproduce la sem\'antica secuencial de A.4.1 (un enlace ve a los
+anteriores) y simplifica el verificador.
 
 \subsection{El AST (\code{hulk-ast})}
 
@@ -518,19 +492,44 @@ HULK: todas las funciones y tipos son visibles con independencia del orden de
 declaraci\'on, por lo que es imposible verificar cuerpos en una sola pasada.
 
 Las tres pasadas de inferencia ---\code{infer_ctor_params}, \code{infer_params} e
-\code{infer_returns}, ejecutadas tras \code{sign}--- van \emph{m\'as all\'a del m\'inimo
-exigido} (A.1--A.8): permiten omitir anotaciones de tipo en par\'ametros de
-constructor (A.9.3), en par\'ametros de funci\'on/m\'etodo y en tipos de retorno,
-deduci\'endolos por punto fijo a partir de los usos. Operan iterando hasta estabilizar
-las firmas (cada vuelta resuelve al menos un nivel de dependencia, de modo que un
-grafo ac\'iclico converge en un n\'umero acotado de pasos). Esta capacidad se ejercita
-en las pruebas \code{a9_param_inference}, \code{a7_unannotated_point} y
-\code{ctor_inference}.
+\code{infer_returns}, ejecutadas tras \code{sign}--- recuperan anotaciones omitidas
+(A.9), una capacidad que excede el m\'inimo A.1--A.8. Conviene ser preciso sobre su
+alcance, porque \emph{no} se trata de inferencia al estilo Hindley--Milner: no hay
+variables de tipo ni unificaci\'on~\cite{pierce2002types}. El mecanismo es
+\textbf{inferencia local dirigida por el uso}, en la l\'inea de la \emph{local type
+inference} de Pierce y Turner~\cite{pierce2000local}, con dos formas:
 
-\begin{table}[t]
+\begin{itemize}
+  \item \textbf{Par\'ametros sin anotar} (\code{infer_ctor_params},
+        \code{infer_params}): cada par\'ametro recibe una \emph{restricci\'on} a partir
+        de sus usos en el cuerpo ---por ejemplo, al pasarse como argumento donde se
+        espera un tipo conocido, o al invocar sobre \'el un m\'etodo que pertenece a un
+        \'unico tipo---. Las restricciones se combinan por su ancestro com\'un (LCA); si
+        un par\'ametro no queda restringido, su tipo es \code{Object}.
+  \item \textbf{Tipos de retorno} (\code{infer_returns}): un \textbf{punto fijo
+        acotado} sobre el grafo de dependencias entre firmas. En cada iteraci\'on se
+        re-verifica el cuerpo de cada funci\'on/m\'etodo sin retorno anotado (con los
+        errores suprimidos durante la inferencia) y se actualiza su tipo de retorno;
+        el proceso se repite mientras alguna firma cambie, con un tope de
+        $(\#\text{inferibles}+1)$ iteraciones.
+\end{itemize}
+
+\noindent
+El bucle \textbf{siempre
+termina} por el tope de iteraciones. Cuando el grafo de dependencias es
+\textbf{ac\'iclico}, cada iteraci\'on resuelve al menos un nivel, de modo que se alcanza
+el tipo local de cada firma. La iteraci\'on es necesaria justamente porque el retorno
+de una funci\'on puede depender del de otra a\'un sin resolver; una sola pasada no
+basta. Para \textbf{recursi\'on mutua} entre funciones sin anotar (p.\,ej. $f$ llama a
+$g$ y $g$ a $f$) no garantizamos converger al tipo ideal dentro del tope ---al no
+haber unificaci\'on, el resultado puede quedar en un tipo conservador o en
+\code{Object}---; esos casos quedan fuera de lo que exige A.9 y se resuelven anotando
+expl\'icitamente el retorno.
+
+\begin{table}[h!]
 \centering
 \caption{Las ocho pasadas del an\'alisis sem\'antico tal como las orquesta
-\code{analyze()}: cuatro fundamentales, tres de inferencia (A.9) y una de
+\code{analyze()}: cuatro fundamentales, tres de inferencia y una de
 interfaces (extensi\'on).}
 \label{tab:pasadas}
 \begin{tabular}{@{}clp{7.0cm}@{}}
@@ -604,8 +603,7 @@ concatenaci\'on, control de flujo (\code{if}/\code{elif}/\code{else}, \code{whil
 con detecci\'on de desbordamiento de pila, orientaci\'on a objetos (herencia,
 constructores parametrizados, despacho virtual, \code{self}, \code{base}), y
 funciones \emph{builtin} (\code{sqrt}, \code{sin}, \code{cos}, \code{exp},
-\code{log}, \code{rand}, \code{print}, \code{range}). M\'as all\'a del m\'inimo, la VM
-implementa los \textbf{vectores} de A.12. Para soportar recursi\'on profunda, el
+\code{log}, \code{rand}, \code{print}, \code{range}). Para soportar recursi\'on profunda, el
 programa se ejecuta en un hilo dedicado con una pila de gran tama\~no.
 
 El conjunto de instrucciones (\code{enum Instr}) es deliberadamente peque\~no y
@@ -619,7 +617,20 @@ a objetos se reduce a \code{NewObject}, \code{GetField}/\code{SetField},
 (despacho est\'atico al m\'etodo del padre). Esta uniformidad hace que el descenso sea
 un recorrido post-orden directo del AST.
 
-\begin{table}[t]
+\paragraph{Costo del despacho}
+Es justo precisar el costo de este modelo, que no est\'a optimizado. El despacho
+din\'amico (\code{CallMethod}) resuelve el m\'etodo en cada llamada: a partir del
+\code{type_name} del objeto receptor, \code{resolve_method} recorre la cadena de
+herencia consultando un \code{HashMap} de m\'etodos por tipo hasta hallar la primera
+definici\'on. No hay \emph{vtables} ni \emph{inline caching}~\cite{aho2006compilers}:
+el costo por llamada es $O(d)$ b\'usquedas en tabla, con $d$ la profundidad de
+herencia (no una b\'usqueda lineal sobre el \emph{heap}). Igualmente, los objetos y vectores guardan sus campos en un
+\code{HashMap<String, Value>}, c\'omodo de implementar pero lejos del \emph{layout}
+contiguo que usar\'ia un compilador serio. Estas son decisiones conscientes a favor de
+la claridad sobre el rendimiento.
+
+
+\begin{table}[tbp]
 \centering
 \caption{Conjunto de instrucciones del IR (\code{enum Instr}), agrupado por funci\'on.}
 \label{tab:isa}
@@ -648,7 +659,7 @@ Listado~\ref{lst:bytecode}. N\'otese c\'omo \code{CallMethod} difiere la resoluc
 \emph{runtime} (el objeto en la cima de la pila determina la implementaci\'on de
 \code{speak}), mientras que dentro de \code{Dog::speak} la llamada \code{base()} se
 compila como un \code{CallBase} que nombra est\'aticamente al tipo padre.
-
+\newpage
 \begin{lstlisting}[caption={Descenso a \emph{bytecode} de la expresi\'on principal del Listado~\ref{lst:e2e}.},label={lst:bytecode}]
 NewObject "Dog"        ; aloca Dog en el heap -> ObjectId en la pila
 PushStr   "Toby"       ; argumento del constructor
@@ -660,7 +671,7 @@ Print                  ; emite el String resultante
 \subsection{El \emph{driver} y el contrato de evaluaci\'on (\code{hulkc})}
 
 El binario \code{hulkc} orquesta el pipeline e implementa el contrato de
-\code{matcom/compilers}. La regla \code{make build} compila en modo \emph{release} y
+matcom/compilers/interface.md. La regla \code{make build} compila en modo \emph{release} y
 copia el artefacto a \code{./hulk}. La invocaci\'on \code{./hulk archivo.hulk} valida
 las tres fases y, en caso de \'exito, genera un ejecutable \code{./output},
 \code{./output} se materializa como un \emph{script} autocontenido que embebe la
@@ -670,8 +681,7 @@ la complejidad de un generador a C o LLVM. Los
 errores se imprimen a \emph{stderr} con el formato exacto
 \code{(line,col) TYPE: message}, con \code{TYPE} $\in$ \{\code{LEXICAL},
 \code{SYNTACTIC}, \code{SEMANTIC}\}, y el c\'odigo de salida (1, 2 o 3) refleja el
-error m\'as fundamental encontrado, regla que emerge naturalmente del orden de las
-fases.
+error m\'as fundamental encontrado.
 
 \subsection{Un ejemplo de extremo a extremo}\label{sec:ejemplo}
 
@@ -712,15 +722,15 @@ tuviera un error ---por ejemplo, si \code{Dog::speak} declarara un retorno
 proceso terminar\'ia con c\'odigo 3, sin alcanzar el \emph{backend}.
 
 % =====================================================================
-\section{Extensiones originales al lenguaje}\label{sec:extensiones}
+\section{Extensiones al lenguaje}\label{sec:extensiones}
 
-Esta secci\'on ---n\'ucleo del aporte de Lenguajes de Programaci\'on--- define, analiza
+Esta secci\'on define, analiza
 y demuestra las tres extensiones. Todas se implementaron como \emph{commits}
 independientes y \emph{backwards-compatible}: todo programa HULK est\'andar sigue
 funcionando sin cambios. La Tabla~\ref{tab:resumen-ext} sintetiza las decisiones de
 dise\~no y sus referentes hist\'oricos.
 
-\begin{table}[t]
+\begin{table}[h!]
 \centering
 \caption{Resumen de las extensiones y sus referentes en lenguajes hist\'oricos.}
 \label{tab:resumen-ext}
@@ -842,17 +852,44 @@ reglas clave son:
         concreto, sin vtable separada.
 \end{itemize}
 
-\paragraph{Conformidad dual.}
-A diferencia de la descripci\'on inicial puramente nominal, la implementaci\'on final
-de \code{conforms} (Listado~\ref{lst:conforms}) acepta \emph{dos} v\'ias cuando el
-tipo destino es una interfaz: la \textbf{nominal} (\code{implements} expl\'icito,
-posiblemente transitivo v\'ia herencia de tipos o \code{extends} de interfaces) y la
-\textbf{estructural} (\emph{protocol-style}, A.10.2): el tipo provee todos los
-m\'etodos requeridos con firma compatible aunque no declare \code{implements}. Esta
-dualidad sit\'ua a HULK entre el modelo nominal de Java/Kotlin/Swift ---que evita
-acoplamientos accidentales y produce mensajes claros--- y el estructural de
-Go/TypeScript ---que favorece el desacoplamiento---, ofreciendo lo mejor de ambos de
-forma controlada.
+\paragraph{Conformidad dual}
+La funci\'on \code{conforms} acepta dos v\'ias cuando el tipo destino es una interfaz.
+Sea $I$ una interfaz y $\mathrm{req}(I)$ el conjunto de firmas que exige, incluidas
+las heredadas por \code{extends}, con los par\'ametros gen\'ericos de $I$ sustituidos
+por los argumentos del sitio de uso. La Figura~\ref{fig:iface} da las dos reglas.
+
+\begin{figure}[tbp]
+\centering
+\fbox{\parbox{0.92\textwidth}{\small
+\[
+\textsc{(Iface\text{-}Nom)}\quad
+\frac{T \text{ (o un ancestro) declara } \mathtt{implements}\ J \quad (J = I \;\lor\; J \mathrel{\mathtt{extends}^{*}} I)}
+     {T \le I}
+\]
+\[
+\textsc{(Iface\text{-}Str)}\quad
+\frac{\forall\, \big(m : (\overline{P}) \to R\big) \in \mathrm{req}(I)\;\; \exists\, \big(m : (\overline{P'}) \to R'\big) \in \mathrm{decl}^{*}(T) \;:\; \overline{P'} = \overline{P} \;\wedge\; R' = R}
+     {T \le I}
+\]}}
+\caption{Conformidad a interfaz: nominal (\code{implements} transitivo) o estructural.
+$\mathrm{decl}^{*}(T)$ son los m\'etodos que $T$ declara o hereda; $\mathtt{extends}^{*}$
+es la clausura transitiva de \code{extends}. La igualdad $\overline{P'}=\overline{P}$,
+$R'=R$ es \textbf{exacta} (invariante), tras sustituir los gen\'ericos de $I$.}
+\label{fig:iface}
+\end{figure}
+
+El emparejamiento \textbf{no es por nombre}: exige que cada m\'etodo requerido exista con
+par\'ametros y retorno \emph{exactamente} iguales (\code{own.params == req\_params \&\&
+own.returns == req\_ret} en el c\'odigo). Por tanto, un m\'etodo con el mismo nombre
+pero distinto tipo de retorno \emph{no} satisface la interfaz, y la conformidad
+falla; no hay, pues, riesgo de violar el principio de sustituci\'on de
+Liskov~\cite{liskov1994subtyping}, porque todo valor visto a trav\'es de $I$ posee
+m\'etodos con las firmas que $I$ promete. El precio de esta exactitud es que la regla
+es \textbf{invariante}: rechaza retornos covariantes o par\'ametros contravariantes
+que ser\'ian seguros. Se eligi\'o la igualdad exacta por simplicidad y por ser
+trivialmente s\'olida~\cite{pierce2002types,abadi1996objects}; relajarla a subtipado
+es trabajo futuro. Esta dualidad sit\'ua a HULK entre el modelo nominal de
+Java/Kotlin/Swift y el estructural de Go/TypeScript.
 
 \begin{lstlisting}[language=Rust,caption={Conformidad hacia una interfaz: primero la v\'ia nominal, luego la estructural.},label={lst:conforms}]
 // dentro de conforms(a, b): cuando `b` nombra una interfaz
@@ -888,6 +925,8 @@ Los objetos viven en un \code{Heap} (un \code{Vec<Slot>}, con
 liberados antes de crecer. El umbral de colecci\'on (\code{gc_threshold}, por defecto
 1024) es configurable v\'ia \code{HULK_GC_THRESHOLD}.
 
+\newpage
+
 \begin{lstlisting}[language=Rust,caption={El \emph{heap} gestionado por el GC.},label={lst:heap}]
 pub struct Heap {
     slots: Vec<Slot>,            // Slot = Live(Object) | Free
@@ -919,33 +958,14 @@ inalcanzable nunca se marca); \textbf{recicla \emph{slots}} mediante el
 no participan en este \emph{heap}.
 
 \paragraph{Traza de ejecuci\'on.}
-El caso \code{tests/extension/gc.hulk} ejecuta un bucle de cien iteraciones que crea
-en cada vuelta una caja ef\'imera \code{Box(i)}, lee su valor y la descarta sin
-retener referencia. Con \code{HULK_GC_THRESHOLD=8}, el \emph{heap} crece hasta el
-umbral y se libera repetidamente sin perder correcci\'on
-(Figura~\ref{fig:gctrace}). Como las cajas de iteraciones previas son inalcanzables
-desde las ra\'ices ---ya no hay variable que las apunte---, el \emph{mark} no las
-visita y el \emph{sweep} las recicla, manteniendo el \emph{heap} acotado pese a las
-cien asignaciones. Una estrategia de conteo de referencias dar\'ia el mismo resultado
-en este caso ac\'iclico; la diferencia se aprecia en \code{a.next := b; b.next := a},
-donde solo el \emph{tracing} reclama el ciclo.
-
-\begin{figure}[t]
-\centering
-\begin{lstlisting}[basicstyle=\ttfamily\scriptsize,frame=none,backgroundcolor=\color{white},numbers=none]
-  asignaciones 1..8        umbral alcanzado          tras collect()
-  +----+----+--   --+      +----+----+--   --+        +----+----+--   --+
-  | B1 | B2 | ...| B8|     | B1 | B2 | ...| B8|        |Free|Free| ...|B8 |
-  +----+----+--   --+ -->  +----+----+--   --+  -->    +----+----+--   --+
-   (todas Live)             mark desde raices:          B1..B7 inalcanzables
-                            solo B8 (la actual)         -> Free (al free_list)
-                            es alcanzable                B8 (viva) permanece
-\end{lstlisting}
-\caption{Traza del \emph{heap} en \code{gc.hulk} con umbral 8: al disparar la
-colecci\'on, solo la caja de la iteraci\'on en curso es alcanzable desde las ra\'ices;
-las anteriores se reciclan al \code{free_list}.}
-\label{fig:gctrace}
-\end{figure}
+El caso \code{tests/extension/gc.hulk} crea en cada vuelta de un bucle de cien
+iteraciones una caja ef\'imera \code{Box(i)} que descarta de inmediato. Con
+\code{HULK_GC_THRESHOLD=8}, al alcanzar el umbral solo la caja de la iteraci\'on en
+curso es alcanzable desde las ra\'ices; el \emph{mark} no visita las anteriores y el
+\emph{sweep} las recicla al \code{free_list}, manteniendo el \emph{heap} acotado pese
+a las cien asignaciones. El conteo de referencias dar\'ia el mismo resultado en este
+caso ac\'iclico; la diferencia se aprecia en \code{a.next := b; b.next := a}, donde
+solo el \emph{tracing} reclama el ciclo.
 
 \paragraph{Comparativa.}
 CPython usa principalmente conteo de referencias con un detector de ciclos adicional
@@ -961,10 +981,12 @@ introdujo para Lisp en 1960~\cite{mccarthy1960recursive}. La
 Tabla~\ref{tab:gc} contrasta las tres familias seg\'un los ejes que motivaron nuestra
 elecci\'on.
 
-\begin{table}[t]
+\begin{table}[tbp]
 \centering
-\caption{Familias de recolecci\'on de basura comparadas en los ejes relevantes para
-un compilador educativo.}
+\caption{Comparaci\'on \textbf{cualitativa} (no emp\'irica: no medimos
+\emph{throughput} ni pausas) de familias de GC seg\'un los ejes que motivaron la
+elecci\'on. Las propiedades resumen lo establecido por Jones et
+al.~\cite{jones2011garbage,jones1996garbage}.}
 \label{tab:gc}
 \begin{tabular}{@{}lccc@{}}
 \toprule
@@ -972,9 +994,9 @@ un compilador educativo.}
 \midrule
 Reclama ciclos        & no (sin extra)    & \textbf{s\'i}        & s\'i \\
 Pausas                & incrementales     & \emph{stop-the-world} & cortas (menores) \\
-\emph{Throughput}     & medio             & medio              & alto \\
+Costo amortizado      & proporcional a refs.\ & proporcional a lo vivo & favorece objetos j\'ovenes \\
 Complejidad de impl.  & baja              & \textbf{baja--media} & alta \\
-Ejemplo               & CPython           & Lisp, Lua          & JVM, Go \\
+Ejemplo               & CPython~\cite{bacon2001recycler} & Lisp~\cite{mccarthy1960recursive}, Lua~\cite{ierusalimschy2016lua} & JVM, Go \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -985,20 +1007,6 @@ ciclos (lo que el conteo de referencias no logra sin un detector adicional) con 
 complejidad de implementaci\'on abordable (a diferencia de los colectores
 generacionales o concurrentes), a cambio de pausas \emph{stop-the-world}
 asumibles en un int\'erprete did\'actico.
-
-\subsection{Vectores (A.12): m\'as all\'a del m\'inimo}
-
-Aunque no son una extensi\'on original ---pertenecen a \emph{HULK --- The Book}---, los
-vectores quedan fuera del m\'inimo exigido (A.1--A.8) y atraviesan todo el pipeline
-igual que las extensiones, por lo que se documentan aqu\'i. Incluyen el literal
-\code{[e0, e1, ...]}, la indexaci\'on \code{v[i]}, el m\'etodo \code{size()}, la
-comprensi\'on por generador \code{[expr | x in iterable]} y la notaci\'on de tipo
-\code{T[]}. El tipo de un literal es \code{T[]} con \code{T} el LCA de sus elementos;
-un vector conforma al iterable tipado (\code{T[] <= T*}) pero es invariante respecto
-de otros vectores. En \emph{runtime} el vector es un objeto del \emph{heap} con una
-lista nativa y un cursor que implementa \code{next}/\code{current}/\code{size}, de
-modo que participa en el GC como cualquier otro objeto. Hacen pasar la categor\'ia
-\emph{generators} de la suite oficial de la c\'atedra.
 
 % =====================================================================
 \section{Evaluaci\'on, pruebas y calidad}\label{sec:evaluacion}
@@ -1019,30 +1027,19 @@ el despacho de m\'etodos y en las ra\'ices del GC, corregidos antes de la integr
 
 % =====================================================================
 \section{Trabajo relacionado}\label{sec:relacionado}
-
-El dise\~no de \emph{The Hitchhiker's Compiler} se inscribe en una larga tradici\'on de
-compiladores e int\'erpretes did\'acticos. La estructura por fases y la separaci\'on
-\emph{frontend}/\emph{backend} siguen el modelo can\'onico de Aho et
-al.~\cite{aho2006compilers} y de Appel~\cite{appel1998modern}. La elecci\'on de una
-m\'aquina de pila con \emph{bytecode}, en lugar de un \'arbol interpretado o un
-generador de c\'odigo nativo, retoma el enfoque de \emph{Crafting
-Interpreters}~\cite{nystrom2021crafting} y de las m\'aquinas virtuales de Lua y la
-JVM, privilegiando la simplicidad de generaci\'on sobre el rendimiento absoluto.
-
-En el plano del sistema de tipos, la conformidad por subtipado y el principio de
-sustituci\'on remiten a Liskov y Wing~\cite{liskov1994subtyping}, mientras que la
-taxonom\'ia de polimorfismo que gu\'ia nuestra extensi\'on de genericidad procede de
-Cardelli y Wegner~\cite{cardelli1985understanding} y su realizaci\'on por
-\emph{erasure} de la incorporaci\'on de genericidad a Java~\cite{bracha1998gj}. La
-decisi\'on de ofrecer conformidad nominal y estructural de forma simult\'anea sit\'ua a
-HULK en un punto intermedio poco com\'un entre el modelo estrictamente nominal de
-Java/Kotlin/Swift y el estructural de Go/TypeScript. Finalmente, el recolector de
-basura reconecta con la l\'inea inaugurada por McCarthy~\cite{mccarthy1960recursive} y
-sistematizada por Jones et al.~\cite{jones2011garbage,jones1996garbage}, de la que
-tomamos la variante \emph{mark-and-sweep} cl\'asica. Lo distintivo de este trabajo no
-es la novedad de cada t\'ecnica por separado, sino su integraci\'on coherente y de bajo
-acoplamiento sobre una base modular en Rust que permiti\'o a\~nadir tres extensiones sin
-reescribir el n\'ucleo.
+La arquitectura por fases sigue el modelo de Aho et al.~\cite{aho2006compilers} y
+Appel~\cite{appel1998modern}, y el \emph{backend} de m\'aquina de pila con
+\emph{bytecode} sigue a \emph{Crafting Interpreters}~\cite{nystrom2021crafting}. Las
+extensiones se apoyan en fuentes can\'onicas, ya citadas en sus secciones: la
+inferencia local en Pierce y Turner~\cite{pierce2000local}; el subtipado nominal y
+estructural en Cardelli--Wegner~\cite{cardelli1985understanding}, Abadi--Cardelli
+\cite{abadi1996objects} y el principio de sustituci\'on de
+Liskov--Wing~\cite{liskov1994subtyping}; el \emph{erasure} de gen\'ericos en
+Bracha et al.~\cite{bracha1998gj}; y la recolecci\'on \emph{mark-and-sweep} en
+McCarthy~\cite{mccarthy1960recursive} y Jones et
+al.~\cite{jones2011garbage}. Lo propio aqu\'i no es ninguna de esas piezas, sino
+combinarlas ---en particular la conformidad nominal \emph{y} estructural--- de forma
+coherente sobre una base modular en Rust.
 
 \newpage
 % =====================================================================
@@ -1050,55 +1047,158 @@ reescribir el n\'ucleo.
 
 \emph{The Hitchhiker's Compiler} implementa el pipeline completo de un compilador
 para HULK, desde el texto fuente hasta la ejecuci\'on, con un dise\~no modular que
-respeta SOLID y DRY, un an\'alisis sem\'antico robusto basado en acumulaci\'on de
+respeta SOLID y DRY, un an\'alisis sem\'antico basado en acumulaci\'on de
 errores y el patr\'on \emph{poison}, y una m\'aquina virtual con recolecci\'on de basura.
-Sobre esa base, el equipo dise\~n\'o y verific\'o tres extensiones ---genericidad,
-interfaces y un recolector \emph{mark-and-sweep}--- fundamentadas en un estudio
-comparativo con lenguajes hist\'oricos.
+Sobre esa base, el equipo dise\~n\'o, implement\'o y valid\'o ---mediante pruebas--- tres
+extensiones (genericidad, interfaces y un recolector \emph{mark-and-sweep}),
+acompa\~nadas de reglas de tipado y de una comparaci\'on cualitativa con lenguajes
+conocidos.
 
 \paragraph{Ventajas.}
 La arquitectura de dependencias unidireccionales y el AST como contrato \'unico
-hicieron las extensiones notablemente baratas: genericidad e interfaces se a\~nadieron
+hicieron las extensiones notablemente simples de implementar: genericidad e interfaces se a\~nadieron
 \emph{sin tocar} el IR ni la VM gracias al borrado de tipos, y el GC se aisl\'o en un
 m\'odulo \code{heap.rs}. El principio abierto/cerrado se cumpli\'o en la pr\'actica: casi
 todo el crecimiento fue mediante nuevas variantes de \code{enum} y nuevas pasadas,
 no modificando l\'ogica existente. El manejo de errores por acumulaci\'on ofrece una
 experiencia de usuario superior a la de detenerse en el primer error.
 
-\paragraph{Desventajas y cr\'iticas.}
-El GC es \emph{stop-the-world} y no compacta, por lo que el
-\emph{heap} crece mon\'otonamente y puede fragmentarse. El borrado de tipos, c\'omodo,
-sacrifica la informaci\'on gen\'erica en \emph{runtime} (no hay \emph{reified
-generics}). Persisten casos acotados de inferencia de tipos que difieren del
-comportamiento ideal del libro, y los mensajes de error sint\'actico, aunque
-posicionados, son menos espec\'ificos que los sem\'anticos. Tampoco se soportan
-comentarios de bloque.
+\paragraph{Desventajas y cr\'iticas (declaradas abiertamente).}
+\begin{itemize}
+  \item \textbf{El \emph{backend} es un int\'erprete, no un generador de c\'odigo.} El
+        ejecutable \code{./output} es un envoltorio que reejecuta el int\'erprete
+        embebiendo la fuente validada; cumple el contrato de evaluaci\'on (que admite
+        un \emph{backend} de m\'aquina virtual) pero no produce un binario nativo desde
+        el IR. Lo decimos sin eufemismos.
+  \item \textbf{Despacho sin optimizar.} Como se detall\'o, \code{CallMethod} resuelve
+        por b\'usqueda en tabla a lo largo de la cadena de herencia, sin \emph{vtables}
+        ni cach\'es; los campos viven en \emph{hash maps}. Es claro pero no r\'apido.
+  \item \textbf{Inferencia local, no Hindley--Milner.} Sin unificaci\'on, la recursi\'on
+        mutua entre funciones sin anotar puede no resolverse al tipo ideal; el m\'inimo
+        A.9 s\'i se cubre.
+  \item \textbf{Conformidad estructural invariante.} Exige igualdad exacta de firmas;
+        es s\'olida pero rechaza variancia segura.
+  \item \textbf{GC \emph{stop-the-world}} sin compactaci\'on (el \emph{heap} crece de
+        forma mon\'otona); \emph{erasure} sin \emph{reified generics}; mensajes de error
+        sint\'actico menos espec\'ificos que los sem\'anticos; sin comentarios de bloque.
+\end{itemize}
 
-\paragraph{Comparativa global.}
-Frente a lenguajes consolidados, HULK extendido adopta decisiones did\'acticamente
-defendibles: el \emph{erasure} de Java por simplicidad de \emph{backend}; la
-conformidad dual (nominal de Java + estructural de Go) como punto medio entre
-seguridad y flexibilidad; y el \emph{tracing} de Lisp/Lua frente al \emph{refcounting}
-de Python, ganando la recuperaci\'on de ciclos a cambio de pausas. Ninguna de estas
-elecciones pretende competir en rendimiento con implementaciones de producci\'on;
-todas privilegian la claridad conceptual.
+\subsection{Estudio comparativo con lenguajes de programaci\'on}\label{sec:comparativa}
 
-\paragraph{Trabajo futuro.}
-Las l\'ineas naturales de mejora incluyen: (i) un \emph{backend} de generaci\'on de
+
+\paragraph{ Polimorfismo param\'etrico (Tabla~\ref{tab:cmp-gen}).}
+La decisi\'on central es \emph{c\'omo} se realiza un par\'ametro de tipo. El
+\textbf{erasure} (HULK, Java~\cite{bracha1998gj,gosling2014java}, Scala/Kotlin sobre
+la JVM) mantiene una sola representaci\'on en ejecuci\'on: es barato y encaja con una VM
+din\'amica, pero pierde la informaci\'on de tipo en \emph{runtime} (no hay \emph{reified
+generics}, no se puede preguntar \code{x is List[Number]}). La
+\textbf{monomorfizaci\'on} (C++, Rust~\cite{klabnik2023rust}) genera una copia por
+instanciaci\'on: m\'as r\'apida y type-safe, a costa de tama\~no de c\'odigo. La
+\textbf{reificaci\'on} en el CLR de .NET~\cite{kennedy2001generics} conserva los tipos
+en ejecuci\'on sin duplicar c\'odigo, pero exige soporte del \emph{runtime}. En
+\emph{varianza}, HULK es \textbf{invariante} ---como los gen\'ericos crudos de Java---,
+la opci\'on m\'as conservadora y trivialmente s\'olida~\cite{pierce2002types}; Scala,
+Kotlin y C\# permiten varianza en el sitio de declaraci\'on, y Java la difiere al sitio
+de uso (\emph{wildcards}). HULK elige el borrado e invarianza por la misma raz\'on:
+son lo m\'as simple que es sano, coherente con su \emph{backend}.
+
+\begin{table}[h!]
+\centering\small
+\caption{Realizaci\'on del polimorfismo param\'etrico. Fuentes:
+\cite{bracha1998gj,gosling2014java,kennedy2001generics,klabnik2023rust,pierce2002types}.}
+\label{tab:cmp-gen}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Lenguaje} & \textbf{Realizaci\'on} & \textbf{Varianza} & \textbf{Tipo en \emph{runtime}} \\
+\midrule
+\textbf{HULK ext.} & \emph{erasure} & invariante & borrado \\
+Java & \emph{erasure} & uso (\emph{wildcards}) & borrado \\
+Scala / Kotlin & \emph{erasure} (JVM) & declaraci\'on & borrado \\
+C\# (.NET) & reificaci\'on & declaraci\'on & presente \\
+C++ / Rust & monomorfizaci\'on & invariante & especializado \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Subtipado e interfaces (Tabla~\ref{tab:cmp-sub}).}
+El contraste cl\'asico es \textbf{nominal} frente a \textbf{estructural}. La disciplina
+nominal (Java, C\#, Swift) hace que un tipo conforme a una interfaz solo si lo
+\emph{declara}: evita coincidencias accidentales y produce diagn\'osticos claros, al
+precio de exigir que el autor del tipo conozca la interfaz de antemano. La estructural
+(Go, TypeScript~\cite{bierman2014typescript}) deduce la conformidad de la forma,
+favoreciendo el desacoplamiento, pero admite coincidencias no intencionadas. HULK
+ofrece \textbf{ambas} (Figura~\ref{fig:iface}): \code{implements} expl\'icito o
+igualdad exacta de firmas. La igualdad exacta es la diferencia fina y deliberada
+frente al subtipado de m\'etodos de Abadi--Cardelli~\cite{abadi1996objects}: renunciamos
+a la variancia de m\'etodos (retorno covariante, par\'ametro contravariante) a cambio de
+una regla que es s\'olida por construcci\'on respecto del principio de
+sustituci\'on~\cite{liskov1994subtyping}.
+
+\begin{table}[tbp]
+\centering\small
+\caption{Disciplina de conformidad a interfaces/protocolos. Fuentes:
+\cite{cardelli1985understanding,abadi1996objects,golang,bierman2014typescript,liskov1994subtyping}.}
+\label{tab:cmp-sub}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Lenguaje} & \textbf{Disciplina} & \textbf{Regla de conformidad} \\
+\midrule
+\textbf{HULK ext.} & nominal \emph{y} estructural & \code{implements}, o firmas exactas \\
+Java / C\# / Swift & nominal & declaraci\'on expl\'icita \\
+Go & estructural & posee los m\'etodos requeridos \\
+TypeScript & estructural & forma compatible (con variancia) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{ Gesti\'on de memoria (Tabla~\ref{tab:cmp-gc}).}
+El espacio va del control manual (C/C++) a la ausencia de GC por \emph{ownership}
+est\'atico en Rust~\cite{klabnik2023rust}, pasando por las dos familias autom\'aticas:
+conteo de referencias y rastreo~\cite{jones2011garbage}. CPython usa conteo con un
+detector de ciclos a\~nadido~\cite{bacon2001recycler}; HULK usa solo rastreo
+\emph{mark-and-sweep}~\cite{mccarthy1960recursive}, que reclama ciclos sin estructura
+extra a cambio de pausas \emph{stop-the-world}. Los \emph{runtimes} de producci\'on
+(JVM, Go, .NET) a\~naden recolecci\'on \textbf{generacional} ---basada en la hip\'otesis
+de que la mayor\'ia de los objetos mueren j\'ovenes~\cite{ungar1984generation}--- y
+concurrencia para acortar las pausas. HULK se queda en el escal\'on m\'as simple que es
+correcto: prioriza entender el algoritmo sobre minimizar la latencia, una elecci\'on
+adecuada a un int\'erprete docente pero expl\'icitamente inferior en rendimiento.
+
+\begin{table}[h!]
+\centering\small
+\caption{Estrategias de gesti\'on de memoria. Fuentes:
+\cite{jones2011garbage,mccarthy1960recursive,bacon2001recycler,ungar1984generation,klabnik2023rust,ierusalimschy2016lua}.}
+\label{tab:cmp-gc}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+\textbf{Lenguaje} & \textbf{Estrategia} & \textbf{Reclama ciclos} & \textbf{Pausas} \\
+\midrule
+\textbf{HULK ext.} & \emph{mark-and-sweep} (STW) & s\'i & s\'i (STW) \\
+Lisp / Lua & rastreo (m-s / incremental) & s\'i & s\'i / incrementales \\
+CPython & conteo + detector de ciclos & s\'i (con detector) & incrementales \\
+JVM / Go / .NET & generacional / concurrente & s\'i & cortas \\
+Rust & \emph{ownership} est\'atico & n/a (sin GC) & ninguna \\
+C / C++ & manual & n/a & ninguna \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{Trabajo futuro}
+Las l\'ineas de mejora incluyen: (i) un \emph{backend} de generaci\'on de
 c\'odigo a C o LLVM, sustituyendo el int\'erprete; (ii) varianza acotada
 (\code{covariant}/\code{contravariant}) y cotas en los par\'ametros de tipo,
 superando la invarianza actual; (iii) un GC generacional o incremental para reducir
 las pausas; (iv) diagn\'osticos sint\'acticos con recuperaci\'on de errores y
 sugerencias; y (v) \emph{reified generics} opcionales para habilitar reflexi\'on de
-tipos en \emph{runtime}. En conjunto, el proyecto demuestra que una base s\'olida y
-modular convierte la incorporaci\'on de caracter\'isticas avanzadas de lenguajes en un
-ejercicio incremental y de bajo riesgo, validando la tesis planteada.
+tipos en \emph{runtime}. En conjunto, el trabajo cumple su objetivo docente: un
+compilador correcto y comprobable para HULK y tres extensiones con reglas de tipado
+precisas, cuya incorporaci\'on incremental ilustra el valor pr\'actico de un dise\~no modular.
 
 \subsubsection*{Disponibilidad.} El c\'odigo fuente completo, las pruebas y la
 documentaci\'on est\'an disponibles en el repositorio del
 proyecto~\cite{hitchhikersrepo}.
 
-% =====================================================================
 % Para camera-ready LNCS estricto, reemplazar por \bibliographystyle{splncs04}
 \bibliographystyle{plain}
 \bibliography{refs}

@@ -1,5 +1,10 @@
 \begin{thebibliography}{10}
 
+\bibitem{abadi1996objects}
+Mart\'in Abadi and Luca Cardelli.
+\newblock {\em A Theory of Objects}.
+\newblock Monographs in Computer Science. Springer, New York, 1996.
+
 \bibitem{aho2006compilers}
 Alfred~V. Aho, Monica~S. Lam, Ravi Sethi, and Jeffrey~D. Ullman.
 \newblock {\em Compilers: Principles, Techniques, and Tools}.
@@ -14,6 +19,12 @@ Andrew~W. Appel.
 David~F. Bacon and V.~T. Rajan.
 \newblock Concurrent cycle collection in reference counted systems.
 \newblock {\em Lecture Notes in Computer Science}, 2072:207--235, 2001.
+
+\bibitem{bierman2014typescript}
+Gavin Bierman, Mart\'in Abadi, and Mads Torgersen.
+\newblock Understanding {TypeScript}.
+\newblock In {\em ECOOP 2014 -- Object-Oriented Programming}, volume 8586 of
+  {\em Lecture Notes in Computer Science}, pages 257--281. Springer, 2014.
 
 \bibitem{bracha1998gj}
 Gilad Bracha, Martin Odersky, David Stoutamire, and Philip Wadler.
@@ -37,10 +48,19 @@ Frank DeRemer and Thomas Pennello.
 \newblock {\em ACM Transactions on Programming Languages and Systems},
   4:615--649, 1982.
 
+\bibitem{golang}
+Alan A.~A. Donovan and Brian~W. Kernighan.
+\newblock The {Go} programming language, 2015.
+
 \bibitem{hulkbook}
 Universidad de La~Habana Facultad de Matem\'atica~y Computaci\'on.
 \newblock {HULK} --- the book: Havana university language for kompilers, 2024.
 \newblock Material docente del curso de Compilaci\'on.
+
+\bibitem{gosling2014java}
+James Gosling, Bill Joy, Guy Steele, Gilad Bracha, and Alex Buckley.
+\newblock {\em The Java Language Specification, Java {SE} 8 Edition}.
+\newblock Addison-Wesley, 2014.
 
 \bibitem{ierusalimschy2016lua}
 Roberto Ierusalimschy.
@@ -58,6 +78,13 @@ Richard Jones and Rafael Lins.
 \newblock {\em Garbage Collection: Algorithms for Automatic Dynamic Memory
   Management}.
 \newblock John Wiley and Sons, Chichester, 1996.
+
+\bibitem{kennedy2001generics}
+Andrew Kennedy and Don Syme.
+\newblock Design and implementation of generics for the {.NET} common language
+  runtime.
+\newblock In {\em Proceedings of the ACM SIGPLAN 2001 Conference on Programming
+  Language Design and Implementation (PLDI '01)}, pages 1--12. ACM, 2001.
 
 \bibitem{klabnik2023rust}
 Steve Klabnik and Carol Nichols.
@@ -96,6 +123,12 @@ Benjamin~C. Pierce.
 \newblock {\em Types and Programming Languages}.
 \newblock MIT Press, Cambridge, MA, 2002.
 
+\bibitem{pierce2000local}
+Benjamin~C. Pierce and David~N. Turner.
+\newblock Local type inference.
+\newblock {\em ACM Transactions on Programming Languages and Systems},
+  22(1):1--44, 2000.
+
 \bibitem{logos}
 Maciej Pl\k{e}sak and Contributors.
 \newblock Logos: Create ridiculously fast lexers, 2024.
@@ -107,5 +140,13 @@ Kevin~Alejandro Torres~Perera, Lianny de la~Caridad Revee~Valdivieso, and
 \newblock The hitchhiker's compiler, 2026.
 \newblock
   \url{https://github.com/MatCom-Developing-Team-10/The-Hitchhikers-Compiler}.
+
+\bibitem{ungar1984generation}
+David Ungar.
+\newblock Generation scavenging: A non-disruptive high performance storage
+  reclamation algorithm.
+\newblock In {\em Proceedings of the ACM SIGSOFT/SIGPLAN Software Engineering
+  Symposium on Practical Software Development Environments}, pages 157--167.
+  ACM, 1984.
 
 \end{thebibliography}

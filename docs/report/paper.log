@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2024.12.6)  21 JUN 2026 13:09
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 24.1) (preloaded format=pdflatex 2024.12.6)  22 JUN 2026 21:59
 entering extended mode
  \write18 enabled.
  %&-line parsing enabled.
@@ -410,22 +410,22 @@ LaTeX Info: Redefining \% on input line 8.
 )
 \openout1 = `paper.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 70.
-LaTeX Font Info:    ... okay on input line 70.
-LaTeX Info: Redefining \. on input line 70.
-LaTeX Info: Redefining \% on input line 70.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Info: Redefining \. on input line 64.
+LaTeX Info: Redefining \% on input line 64.
 
 (C:\Users\JL\AppData\Local\Programs\MiKTeX\tex/context/base/mkii\supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
@@ -451,13 +451,13 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 4
 File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
 \c@lstlisting=\count328
-LaTeX Info: Redefining \microtypecontext on input line 70.
-Package microtype Info: Applying patch `item' on input line 70.
-Package microtype Info: Applying patch `toc' on input line 70.
-Package microtype Info: Applying patch `eqnum' on input line 70.
-Package microtype Info: Applying patch `footnote' on input line 70.
-Package microtype Info: Applying patch `verbatim' on input line 70.
-LaTeX Info: Redefining \microtypesetup on input line 70.
+LaTeX Info: Redefining \microtypecontext on input line 64.
+Package microtype Info: Applying patch `item' on input line 64.
+Package microtype Info: Applying patch `toc' on input line 64.
+Package microtype Info: Applying patch `eqnum' on input line 64.
+Package microtype Info: Applying patch `footnote' on input line 64.
+Package microtype Info: Applying patch `verbatim' on input line 64.
+LaTeX Info: Redefining \microtypesetup on input line 64.
 Package microtype Info: Generating PDF output.
 Package microtype Info: Character protrusion enabled (level 2).
 Package microtype Info: Using default protrusion set `alltext'.
@@ -469,7 +469,7 @@ Package microtype Info: No adjustment of character kerning.
 File: mt-cmr.cfg 2013/05/19 v2.2 microtype config. file: Computer Modern Roman 
 (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+msa on input line 92.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 81.
 
 
 (C:\Users\JL\AppData\Local\Programs\MiKTeX\tex/latex/amsfonts\umsa.fd
@@ -478,7 +478,7 @@ File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 (C:\Users\JL\AppData\Local\Programs\MiKTeX\tex/latex/microtype\mt-msa.cfg
 File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 92.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 81.
 
 
 (C:\Users\JL\AppData\Local\Programs\MiKTeX\tex/latex/amsfonts\umsb.fd
@@ -487,8 +487,8 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 (C:\Users\JL\AppData\Local\Programs\MiKTeX\tex/latex/microtype\mt-msb.cfg
 File: mt-msb.cfg 2005/06/01 v1.0 microtype config. file: AMS symbols (b) (RS)
 )
-LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 9
-2.
+LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 8
+1.
 
 (C:\Users\JL\AppData\Local\Programs\MiKTeX\tex/latex/base\t1cmtt.fd
 File: t1cmtt.fd 2023/04/13 v2.5m Standard LaTeX font definitions
@@ -500,119 +500,153 @@ Package microtype Info: Loading generic protrusion settings for font family
 <matcom_logo.jpg, id=1, 3189.66656pt x 2407.49437pt>
 File: matcom_logo.jpg Graphic file (type jpg)
 <use matcom_logo.jpg>
-Package pdftex.def Info: matcom_logo.jpg  used on input line 92.
+Package pdftex.def Info: matcom_logo.jpg  used on input line 81.
 (pdftex.def)             Requested size: 45.21474pt x 34.14322pt.
 File: matcom_logo.jpg Graphic file (type jpg)
 <use matcom_logo.jpg>
-Package pdftex.def Info: matcom_logo.jpg  used on input line 92.
+Package pdftex.def Info: matcom_logo.jpg  used on input line 81.
 (pdftex.def)             Requested size: 45.21474pt x 34.14322pt.
  [1
 
 
 {C:/Users/JL/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map} <./matcom_logo.j
 pg>]
-LaTeX Info: Redefining \. on input line 182.
-LaTeX Info: Redefining \% on input line 182.
+LaTeX Info: Redefining \. on input line 168.
+LaTeX Info: Redefining \% on input line 168.
 
 [2]
-LaTeX Info: Redefining \. on input line 237.
-LaTeX Info: Redefining \% on input line 237.
+LaTeX Info: Redefining \. on input line 229.
+LaTeX Info: Redefining \% on input line 229.
  [3]
-LaTeX Info: Redefining \. on input line 325.
-LaTeX Info: Redefining \% on input line 325.
+LaTeX Info: Redefining \. on input line 305.
+LaTeX Info: Redefining \% on input line 305.
  [4]
-LaTeX Info: Redefining \. on input line 356.
-LaTeX Info: Redefining \% on input line 356.
+LaTeX Info: Redefining \. on input line 344.
+LaTeX Info: Redefining \% on input line 344.
  [5]
-Overfull \hbox (12.1454pt too wide) in paragraph at lines 427--440
+
+LaTeX Warning: `h' float specifier changed to `ht'.
+
+
+Overfull \hbox (12.1454pt too wide) in paragraph at lines 408--421
  [][] 
  []
 
-LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <10> not available
-(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 448.
-LaTeX Info: Redefining \. on input line 467.
-LaTeX Info: Redefining \% on input line 467.
+LaTeX Info: Redefining \. on input line 429.
+LaTeX Info: Redefining \% on input line 429.
 [6]
-LaTeX Info: Redefining \. on input line 489.
-LaTeX Info: Redefining \% on input line 489.
+LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <10> not available
+(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 429.
+LaTeX Info: Redefining \. on input line 470.
+LaTeX Info: Redefining \% on input line 470.
  [7]
-LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <9> not available
-(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 492.
-
-Overfull \hbox (42.03398pt too wide) in paragraph at lines 520--529
+Overfull \hbox (42.03398pt too wide) in paragraph at lines 494--501
 []\T1/cmr/m/n/10 Las tres pa-sa-das de in-fe-ren-cia ---\T1/cmtt/m/n/10 infer_c
 tor_params\T1/cmr/m/n/10 , \T1/cmtt/m/n/10 infer_params \T1/cmr/m/n/10 e \T1/cm
 tt/m/n/10 infer_returns\T1/cmr/m/n/10 ,
  []
 
-LaTeX Info: Redefining \. on input line 529.
-LaTeX Info: Redefining \% on input line 529.
+LaTeX Info: Redefining \. on input line 509.
+LaTeX Info: Redefining \% on input line 509.
 [8]
-LaTeX Info: Redefining \. on input line 571.
-LaTeX Info: Redefining \% on input line 571.
+LaTeX Info: Redefining \. on input line 560.
+LaTeX Info: Redefining \% on input line 560.
  [9]
-Overfull \hbox (21.0062pt too wide) in paragraph at lines 575--583
+LaTeX Font Info:    Font shape `T1/cmtt/bx/n' in size <9> not available
+(Font)              Font shape `T1/cmtt/m/n' tried instead on input line 561.
+
+Overfull \hbox (21.0062pt too wide) in paragraph at lines 574--582
 []\T1/cmr/m/n/10 Para evi-tar \T1/cmr/bx/n/10 cas-ca-das de erro-res\T1/cmr/m/n
 /10 , el ve-ri-fi-ca-dor usa el pa-trón \T1/cmr/m/it/10 poi-son \T1/cmtt/m/n/10
  Type::Error\T1/cmr/m/n/10 .
  []
 
-LaTeX Info: Redefining \. on input line 651.
-LaTeX Info: Redefining \% on input line 651.
+LaTeX Info: Redefining \. on input line 619.
+LaTeX Info: Redefining \% on input line 619.
 [10]
-Overfull \hbox (15.82005pt too wide) in paragraph at lines 662--675
-\T1/cmr/m/n/10 El bi-na-rio \T1/cmtt/m/n/10 hulkc \T1/cmr/m/n/10 or-ques-ta el 
-pi-pe-li-ne e im-ple-men-ta el con-tra-to de \T1/cmtt/m/n/10 matcom/compilers\T
-1/cmr/m/n/10 .
- []
-
-LaTeX Info: Redefining \. on input line 682.
-LaTeX Info: Redefining \% on input line 682.
-[11]
-LaTeX Info: Redefining \. on input line 745.
-LaTeX Info: Redefining \% on input line 745.
+LaTeX Info: Redefining \. on input line 662.
+LaTeX Info: Redefining \% on input line 662.
+ [11]
+LaTeX Info: Redefining \. on input line 723.
+LaTeX Info: Redefining \% on input line 723.
  [12]
-Overfull \hbox (16.40135pt too wide) in paragraph at lines 758--761
+Overfull \hbox (16.40135pt too wide) in paragraph at lines 768--771
  \T1/cmr/m/it/10 Re-glas se-mán-ti-cas.[] \T1/cmr/m/n/10 El sis-te-ma in-tro-du
 -ce dos va-rian-tes de ti-po: \T1/cmtt/m/n/10 Type::Generic(name,
  []
 
-LaTeX Info: Redefining \. on input line 798.
-LaTeX Info: Redefining \% on input line 798.
+LaTeX Info: Redefining \. on input line 777.
+LaTeX Info: Redefining \% on input line 777.
 [13]
-Overfull \hbox (17.34717pt too wide) in paragraph at lines 838--840
+LaTeX Info: Redefining \. on input line 825.
+LaTeX Info: Redefining \% on input line 825.
+ [14]
+Overfull \hbox (17.34717pt too wide) in paragraph at lines 848--850
 []\T1/cmr/bx/n/10 Herencia múl-ti-ple \T1/cmr/m/n/10 en-tre in-ter-fa-ces y \T1
 /cmr/bx/n/10 im-ple-men-ta-ción múl-ti-ple \T1/cmr/m/n/10 (\T1/cmtt/m/n/10 impl
 ements
  []
 
-LaTeX Info: Redefining \. on input line 856.
-LaTeX Info: Redefining \% on input line 856.
-[14]
-Overfull \hbox (74.62459pt too wide) in paragraph at lines 868--874
+
+Overfull \hbox (18.25272pt too wide) detected at line 873
+[] []
+ []
+
+
+Overfull \hbox (56.15053pt too wide) detected at line 873
+[] []
+ []
+
+
+Overfull \hbox (13.77296pt too wide) in paragraph at lines 881--893
+\T1/cmr/m/n/10 exis-ta con pa-rá-me-tros y re-torno \T1/cmr/m/it/10 exac-ta-men
+-te \T1/cmr/m/n/10 igua-les (\T1/cmtt/m/n/10 own.params == req\_params
+ []
+
+LaTeX Info: Redefining \. on input line 893.
+LaTeX Info: Redefining \% on input line 893.
+[15]
+Overfull \hbox (74.62459pt too wide) in paragraph at lines 905--911
 \T1/cmr/m/n/10 y la se-mán-ti-ca, \T1/cmtt/m/n/10 lookup_interface_method\T1/cm
 r/m/n/10 , \T1/cmtt/m/n/10 implements_interface\T1/cmr/m/n/10 , \T1/cmtt/m/n/10
  structurally_implements
  []
 
-LaTeX Info: Redefining \. on input line 895.
-LaTeX Info: Redefining \% on input line 895.
-[15]
-LaTeX Info: Redefining \. on input line 963.
-LaTeX Info: Redefining \% on input line 963.
- [16]
-LaTeX Info: Redefining \. on input line 1019.
-LaTeX Info: Redefining \% on input line 1019.
- [17]
-LaTeX Info: Redefining \. on input line 1047.
-LaTeX Info: Redefining \% on input line 1047.
- [18] (paper.bbl
-LaTeX Info: Redefining \. on input line 8.
-LaTeX Info: Redefining \% on input line 8.
- [19])
-LaTeX Info: Redefining \. on input line 1106.
-LaTeX Info: Redefining \% on input line 1106.
- [20] (paper.aux
+LaTeX Info: Redefining \. on input line 928.
+LaTeX Info: Redefining \% on input line 928.
+[16]
+Overfull \hbox (11.45602pt too wide) in paragraph at lines 991--1002
+ [][] 
+ []
+
+LaTeX Info: Redefining \. on input line 1010.
+LaTeX Info: Redefining \% on input line 1010.
+[17]
+LaTeX Info: Redefining \. on input line 1044.
+LaTeX Info: Redefining \% on input line 1044.
+ [18]
+LaTeX Info: Redefining \. on input line 1104.
+LaTeX Info: Redefining \% on input line 1104.
+ [19]
+LaTeX Info: Redefining \. on input line 1166.
+LaTeX Info: Redefining \% on input line 1166.
+ [20]
+Overfull \hbox (17.58963pt too wide) in paragraph at lines 1188--1197
+\T1/cmr/m/n/10 LLVM, sus-ti-tu-yen-do el in-tér-pre-te; (ii) va-rian-za aco-ta-
+da (\T1/cmtt/m/n/10 covariant\T1/cmr/m/n/10 /\T1/cmtt/m/n/10 contravariant\T1/c
+mr/m/n/10 )
+ []
+
+(paper.bbl
+LaTeX Info: Redefining \. on input line 34.
+LaTeX Info: Redefining \% on input line 34.
+ [21]
+LaTeX Info: Redefining \. on input line 151.
+LaTeX Info: Redefining \% on input line 151.
+ [22])
+LaTeX Info: Redefining \. on input line 1206.
+LaTeX Info: Redefining \% on input line 1206.
+ [23] (paper.aux
 LaTeX Info: Redefining \. on input line 8.
 LaTeX Info: Redefining \% on input line 8.
 )
@@ -622,40 +656,44 @@ L3 programming layer <2024-01-04>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 9608 strings out of 474485
- 146599 string characters out of 5745150
- 2229542 words of memory out of 5000000
- 31783 multiletter control sequences out of 15000+600000
- 578057 words of font info for 84 fonts, out of 8000000 for 9000
+ 9601 strings out of 474485
+ 146620 string characters out of 5745150
+ 2232542 words of memory out of 5000000
+ 31774 multiletter control sequences out of 15000+600000
+ 579526 words of font info for 86 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 57i,10n,65p,1004b,1965s stack positions out of 10000i,1000n,20000p,200000b,200000s
- <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecit090
-0.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi525\ectt
-0800.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\e
-cbi1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi60
-0\eccc0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dp
-i600\eccc1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec
-/dpi600\ectt1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen
-/ec/dpi600\ecbx1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknap
-pen/ec/dpi600\ecti1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jk
-nappen/ec/dpi600\ecbx1200.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour
-/jknappen/ec/dpi600\ecti0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljf
-our/jknappen/ec/dpi600\ecbx0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/
-ljfour/jknappen/ec/dpi600\ectt0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/
-pk/ljfour/jknappen/ec/dpi600\ecrm0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fon
-ts/pk/ljfour/jknappen/ec/dpi600\ecrm1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\
-fonts/pk/ljfour/jknappen/ec/dpi600\ecbx1440.pk><C:/Users/JL/AppData/Local/Progr
-ams/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi10.pfb><C:/Users/JL/AppData/Local
-/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi9.pfb><C:/Users/JL/AppData/
-Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmr9.pfb><C:/Users/JL/AppD
-ata/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy10.pfb><C:/Users/J
-L/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy9.pfb><C:/Us
-ers/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmtt10.pfb>
-<C:/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmtt9
-.pfb>
-Output written on paper.pdf (20 pages, 844345 bytes).
+ 57i,11n,65p,1004b,1968s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecbi090
+0.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi600\ecit
+0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi525\e
+ctt0800.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dpi60
+0\ecbi1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec/dp
+i600\eccc0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen/ec
+/dpi600\eccc1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknappen
+/ec/dpi600\ectt1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jknap
+pen/ec/dpi600\ecbx1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour/jk
+nappen/ec/dpi600\ecti1000.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljfour
+/jknappen/ec/dpi600\ecbx1200.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/ljf
+our/jknappen/ec/dpi600\ecti0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/pk/
+ljfour/jknappen/ec/dpi600\ecbx0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fonts/
+pk/ljfour/jknappen/ec/dpi600\ectt0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\fon
+ts/pk/ljfour/jknappen/ec/dpi600\ecrm0900.pk> <C:\Users\JL\AppData\Local\MiKTeX\
+fonts/pk/ljfour/jknappen/ec/dpi600\ecrm1000.pk> <C:\Users\JL\AppData\Local\MiKT
+eX\fonts/pk/ljfour/jknappen/ec/dpi600\ecbx1440.pk><C:/Users/JL/AppData/Local/Pr
+ograms/MiKTeX/fonts/type1/public/amsfonts/cmextra/cmex9.pfb><C:/Users/JL/AppDat
+a/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi10.pfb><C:/Users/JL/
+AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmmi9.pfb><C:/User
+s/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmr10.pfb><C:
+/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmr9.pfb
+><C:/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/cm/cmsy
+10.pfb><C:/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfonts/c
+m/cmsy6.pfb><C:/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/amsfo
+nts/cm/cmsy9.pfb><C:/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/public/
+amsfonts/cm/cmtt10.pfb><C:/Users/JL/AppData/Local/Programs/MiKTeX/fonts/type1/p
+ublic/amsfonts/cm/cmtt9.pfb>
+Output written on paper.pdf (23 pages, 893285 bytes).
 PDF statistics:
- 949 PDF objects out of 1000 (max. 8388607)
+ 996 PDF objects out of 1000 (max. 8388607)
  0 named destinations out of 1000 (max. 500000)
- 16902 words of extra memory for PDF output out of 17280 (max. 10000000)
+ 17926 words of extra memory for PDF output out of 20736 (max. 10000000)
 
